@@ -10,6 +10,11 @@ const api = {
   reorderServices: (order: string[]): Promise<DeskboxState> => ipcRenderer.invoke(IPC.REORDER_SERVICES, order),
   selectService: (instanceId: string): Promise<DeskboxState> => ipcRenderer.invoke(IPC.SELECT_SERVICE, instanceId),
   setTheme: (theme: Theme): Promise<DeskboxState> => ipcRenderer.invoke(IPC.SET_THEME, theme),
+  addWorkspace: (name: string): Promise<DeskboxState> => ipcRenderer.invoke(IPC.ADD_WORKSPACE, name),
+  removeWorkspace: (workspaceId: string): Promise<DeskboxState> =>
+    ipcRenderer.invoke(IPC.REMOVE_WORKSPACE, workspaceId),
+  selectWorkspace: (workspaceId: string): Promise<DeskboxState> =>
+    ipcRenderer.invoke(IPC.SELECT_WORKSPACE, workspaceId),
   onStateChanged: (callback: (state: DeskboxState) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: DeskboxState): void => callback(state)
     ipcRenderer.on(IPC.STATE_CHANGED, listener)

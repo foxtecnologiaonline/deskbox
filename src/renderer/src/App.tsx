@@ -1,13 +1,15 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import type { CatalogEntry, DeskboxState } from '@shared/types'
 import Sidebar from './components/Sidebar'
 import AddServiceModal from './components/AddServiceModal'
+import NewWorkspaceModal from './components/NewWorkspaceModal'
 import EmptyState from './components/EmptyState'
 
 export default function App(): JSX.Element {
   const [state, setState] = useState<DeskboxState | null>(null)
   const [catalog, setCatalog] = useState<CatalogEntry[]>([])
   const [modalOpen, setModalOpen] = useState(false)
+  const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false)
 
   useEffect(() => {
     window.deskbox.getState().then(setState)
@@ -26,6 +28,11 @@ export default function App(): JSX.Element {
     }
   }, [state?.theme])
 
+  const servicesInActiveWorkspace = useMemo(
+    () => (state ? state.services.filter((service) => service.workspaceId === state.activeWorkspaceId) : []),
+    [state]
+  )
+
   const handleAddFromCatalog = useCallback(async (catalogId: string) => {
     await window.deskbox.addService({ catalogId })
     setModalOpen(false)
@@ -36,6 +43,11 @@ export default function App(): JSX.Element {
     setModalOpen(false)
   }, [])
 
+  const handleCreateWorkspace = useCallback(async (name: string) => {
+    await window.deskbox.addWorkspace(name)
+    setWorkspaceModalOpen(false)
+  }, [])
+
   if (!state) {
     return <div className="app-loading">Carregando…</div>
   }
@@ -43,7 +55,9 @@ export default function App(): JSX.Element {
   return (
     <div className="app-shell">
       <Sidebar
-        services={state.services}
+        services={servicesInActiveWorkspace}
+        workspaces={state.workspaces}
+        activeWorkspaceId={state.activeWorkspaceId}
         activeInstanceId={state.activeInstanceId}
         theme={state.theme}
         onSelect={(id) => window.deskbox.selectService(id)}
@@ -54,9 +68,12 @@ export default function App(): JSX.Element {
           const next = state.theme === 'dark' ? 'light' : 'dark'
           window.deskbox.setTheme(next)
         }}
+        onSelectWorkspace={(id) => window.deskbox.selectWorkspace(id)}
+        onAddWorkspaceClick={() => setWorkspaceModalOpen(true)}
+        onRemoveWorkspace={(id) => window.deskbox.removeWorkspace(id)}
       />
       <main className="content-area">
-        {state.services.length === 0 && <EmptyState onAddClick={() => setModalOpen(true)} />}
+        {servicesInActiveWorkspace.length === 0 && <EmptyState onAddClick={() => setModalOpen(true)} />}
       </main>
       {modalOpen && (
         <AddServiceModal
@@ -65,6 +82,9 @@ export default function App(): JSX.Element {
           onAddFromCatalog={handleAddFromCatalog}
           onAddCustom={handleAddCustom}
         />
+      )}
+      {workspaceModalOpen && (
+        <NewWorkspaceModal onClose={() => setWorkspaceModalOpen(false)} onCreate={handleCreateWorkspace} />
       )}
     </div>
   )

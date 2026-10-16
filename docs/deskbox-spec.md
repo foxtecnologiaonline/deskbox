@@ -34,10 +34,16 @@ src/
   shared/      tipos e constantes de IPC compartilhados
 ```
 
-## Fora do escopo do MVP (próximas versões)
-- Workspaces (agrupar serviços em espaços nomeados).
-- Hibernação real de serviços inativos (descarregar processo).
+## Implementado após o MVP
+
+- **Workspaces**: serviços pertencem a um workspace (`workspaceId`); switcher na sidebar (pills circulares com iniciais) permite criar, trocar e remover workspaces. Sempre existe ao menos um (`Geral`, criado por padrão). Trocar de workspace troca o `BrowserView` exibido e filtra a lista de serviços mostrada.
+- **Hibernação de serviços inativos**: a cada 60s uma varredura destrói (`webContents.close()`) o `BrowserView` de qualquer serviço que não esteja ativo há mais de 10 minutos (`HIBERNATE_AFTER_MS` em `src/main/services-manager.ts`). A sessão (`persist:`) permanece salva em disco, então reabrir o serviço restaura o login. Serviços hibernados aparecem com ícone esmaecido na sidebar; clicar neles recria o `BrowserView` sob demanda. No `init()`, apenas o serviço ativo é carregado — os demais começam hibernados.
+- **Empacotamento**: configuração do `electron-builder` em `package.json` (`build`), com scripts `npm run dist` / `dist:mac` / `dist:win` / `dist:linux`. Validado localmente com `electron-builder --linux dir` (build sem empacotador externo). Falta: ícones customizados (`build/icon.{png,icns,ico}` — hoje usa o ícone padrão do Electron) e assinatura de código para macOS/Windows.
+
+## Fora do escopo (próximas versões)
 - CSS/JS customizado por serviço.
 - Sincronização de configuração entre dispositivos (conta Deskbox).
 - Bloqueio por senha mestre / criptografia local.
-- Empacotamento/distribuição (electron-builder) e auto-update.
+- Auto-update.
+- Busca rápida (command palette) entre serviços.
+- Ícones de app customizados e assinatura de código para distribuição.

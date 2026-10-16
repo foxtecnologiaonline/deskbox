@@ -8,6 +8,11 @@ export interface CatalogEntry {
   category: string
 }
 
+export interface Workspace {
+  id: string
+  name: string
+}
+
 export interface ServiceInstance {
   instanceId: string
   catalogId: string
@@ -15,13 +20,18 @@ export interface ServiceInstance {
   url: string
   domain: string
   partition: string
+  workspaceId: string
   order: number
   muted: boolean
   unreadCount: number
+  /** Calculado em tempo de execução: true quando o BrowserView foi descarregado da memória. */
+  hibernated: boolean
 }
 
 export interface DeskboxState {
   services: ServiceInstance[]
+  workspaces: Workspace[]
+  activeWorkspaceId: string
   activeInstanceId: string | null
   theme: Theme
 }

@@ -37,13 +37,16 @@ function createMainWindow(): void {
     (updater) => store.setState(updater)
   )
 
-  ipcMain.handle(IPC.GET_STATE, () => store.getState())
+  ipcMain.handle(IPC.GET_STATE, () => manager.getEnrichedState())
   ipcMain.handle(IPC.GET_CATALOG, () => manager.getCatalog())
   ipcMain.handle(IPC.ADD_SERVICE, (_event, payload: AddServicePayload) => manager.addService(payload))
   ipcMain.handle(IPC.REMOVE_SERVICE, (_event, instanceId: string) => manager.removeService(instanceId))
   ipcMain.handle(IPC.REORDER_SERVICES, (_event, order: string[]) => manager.reorderServices(order))
   ipcMain.handle(IPC.SELECT_SERVICE, (_event, instanceId: string) => manager.selectService(instanceId))
   ipcMain.handle(IPC.SET_THEME, (_event, theme: 'light' | 'dark' | 'system') => manager.setTheme(theme))
+  ipcMain.handle(IPC.ADD_WORKSPACE, (_event, name: string) => manager.addWorkspace(name))
+  ipcMain.handle(IPC.REMOVE_WORKSPACE, (_event, workspaceId: string) => manager.removeWorkspace(workspaceId))
+  ipcMain.handle(IPC.SELECT_WORKSPACE, (_event, workspaceId: string) => manager.selectWorkspace(workspaceId))
 
   manager.init()
 

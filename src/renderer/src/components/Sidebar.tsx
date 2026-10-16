@@ -1,9 +1,12 @@
 import { useState } from 'react'
-import type { ServiceInstance, Theme } from '@shared/types'
+import type { ServiceInstance, Theme, Workspace } from '@shared/types'
 import { faviconUrl } from '@shared/favicon'
+import WorkspaceSwitcher from './WorkspaceSwitcher'
 
 interface SidebarProps {
   services: ServiceInstance[]
+  workspaces: Workspace[]
+  activeWorkspaceId: string
   activeInstanceId: string | null
   theme: Theme
   onSelect: (instanceId: string) => void
@@ -11,17 +14,25 @@ interface SidebarProps {
   onReorder: (order: string[]) => void
   onAddClick: () => void
   onThemeToggle: () => void
+  onSelectWorkspace: (workspaceId: string) => void
+  onAddWorkspaceClick: () => void
+  onRemoveWorkspace: (workspaceId: string) => void
 }
 
 export default function Sidebar({
   services,
+  workspaces,
+  activeWorkspaceId,
   activeInstanceId,
   theme,
   onSelect,
   onRemove,
   onReorder,
   onAddClick,
-  onThemeToggle
+  onThemeToggle,
+  onSelectWorkspace,
+  onAddWorkspaceClick,
+  onRemoveWorkspace
 }: SidebarProps): JSX.Element {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const sorted = [...services].sort((a, b) => a.order - b.order)
@@ -39,16 +50,24 @@ export default function Sidebar({
 
   return (
     <aside className="sidebar">
+      <WorkspaceSwitcher
+        workspaces={workspaces}
+        activeWorkspaceId={activeWorkspaceId}
+        onSelect={onSelectWorkspace}
+        onAddClick={onAddWorkspaceClick}
+        onRemove={onRemoveWorkspace}
+      />
+      <div className="sidebar-divider" />
       <div className="sidebar-services">
         {sorted.map((service) => (
           <div
             key={service.instanceId}
-            className={`service-icon-wrap ${service.instanceId === activeInstanceId ? 'active' : ''}`}
+            className={`service-icon-wrap ${service.instanceId === activeInstanceId ? 'active' : ''} ${service.hibernated ? 'hibernated' : ''}`}
             draggable
             onDragStart={() => setDraggingId(service.instanceId)}
             onDragOver={(e) => e.preventDefault()}
             onDrop={() => handleDrop(service.instanceId)}
-            title={service.name}
+            title={service.hibernated ? `${service.name} (hibernado — clique para reativar)` : service.name}
           >
             <button className="service-icon" onClick={() => onSelect(service.instanceId)}>
               <img src={faviconUrl(service.domain)} alt={service.name} />

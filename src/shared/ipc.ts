@@ -7,5 +7,8 @@ export const IPC = {
   REORDER_SERVICES: 'deskbox:reorder-services',
   SELECT_SERVICE: 'deskbox:select-service',
   SET_THEME: 'deskbox:set-theme',
-  SERVICE_UNREAD: 'deskbox:service-unread'
+  SERVICE_UNREAD: 'deskbox:service-unread',
+  ADD_WORKSPACE: 'deskbox:add-workspace',
+  REMOVE_WORKSPACE: 'deskbox:remove-workspace',
+  SELECT_WORKSPACE: 'deskbox:select-workspace'
 } as const

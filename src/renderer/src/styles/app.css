@@ -24,9 +24,80 @@ html,
   background: var(--bg-sidebar);
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  align-items: center;
   padding: 10px 0;
   -webkit-app-region: drag;
+}
+
+.workspace-switcher {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  -webkit-app-region: no-drag;
+}
+
+.workspace-pill-wrap {
+  position: relative;
+  width: 32px;
+  height: 32px;
+}
+
+.workspace-pill {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-on-sidebar);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.workspace-pill-wrap.active .workspace-pill {
+  border-color: var(--accent);
+}
+
+.remove-workspace {
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: none;
+  background: var(--danger);
+  color: white;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.workspace-pill-wrap:hover .remove-workspace {
+  display: flex;
+}
+
+.add-workspace {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px dashed rgba(255, 255, 255, 0.3);
+  background: transparent;
+  color: var(--text-on-sidebar);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.sidebar-divider {
+  width: 32px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 10px 0;
+  flex-shrink: 0;
 }
 
 .sidebar-services {
@@ -35,6 +106,7 @@ html,
   align-items: center;
   gap: 8px;
   overflow-y: auto;
+  flex: 1;
   -webkit-app-region: no-drag;
 }
 
@@ -117,9 +189,14 @@ html,
   margin-top: 4px;
 }
 
+.service-icon-wrap.hibernated .service-icon {
+  opacity: 0.45;
+}
+
 .sidebar-footer {
   display: flex;
   justify-content: center;
+  margin-top: 4px;
 }
 
 .theme-toggle {
