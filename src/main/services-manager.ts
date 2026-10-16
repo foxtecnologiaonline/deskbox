@@ -36,6 +36,7 @@ export class ServicesManager {
     this.setState = setState
   }
 
+  /** Configuração única, válida para a vida inteira do app (um só Store/ServicesManager). */
   init(): void {
     const state = this.getState()
     const activeExists = state.services.some((s) => s.instanceId === state.activeInstanceId)
@@ -49,21 +50,47 @@ export class ServicesManager {
       }
     }
 
-    this.window.on('resize', () => this.layout())
+    this.attachWindowListeners()
     setInterval(() => this.sweepHibernation(), HIBERNATION_SWEEP_INTERVAL_MS)
+    ipcMain.on(IPC.SERVICE_UNREAD, this.handleUnreadMessage)
+  }
 
-    ipcMain.on(IPC.SERVICE_UNREAD, (event, count: number) => {
-      const instanceId = this.webContentsIdToInstance.get(event.sender.id)
-      if (!instanceId) return
-      this.setState((state) => ({
-        ...state,
-        services: state.services.map((service) =>
-          service.instanceId === instanceId ? { ...service, unreadCount: count } : service
-        )
-      }))
-      this.updateBadge()
-      this.broadcastState()
-    })
+  /**
+   * Reconecta o manager a uma nova BrowserWindow sem recriar Store/listeners/timers.
+   * Necessário no macOS: fechar todas as janelas não encerra o app (window-all-closed
+   * não chama app.quit() no darwin) e clicar no ícone do dock cria uma nova janela
+   * (evento 'activate'); sem isso o app tentaria registrar ipcMain.handle duas vezes
+   * para o mesmo canal, o que lança erro, e vazaria o setInterval de hibernação antigo
+   * apontando para uma janela já destruída.
+   */
+  rebindWindow(window: BrowserWindow): void {
+    this.window = window
+    this.attachWindowListeners()
+    if (this.currentlyShownInstanceId) {
+      const view = this.views.get(this.currentlyShownInstanceId)
+      if (view) {
+        this.window.setBrowserView(view)
+      }
+    }
+    this.layout()
+    this.broadcastState()
+  }
+
+  private attachWindowListeners(): void {
+    this.window.on('resize', () => this.layout())
+  }
+
+  private handleUnreadMessage = (event: Electron.IpcMainEvent, count: number): void => {
+    const instanceId = this.webContentsIdToInstance.get(event.sender.id)
+    if (!instanceId) return
+    this.setState((state) => ({
+      ...state,
+      services: state.services.map((service) =>
+        service.instanceId === instanceId ? { ...service, unreadCount: count } : service
+      )
+    }))
+    this.updateBadge()
+    this.broadcastState()
   }
 
   getCatalog() {
