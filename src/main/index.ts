@@ -1,11 +1,19 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
+import { existsSync } from 'fs'
 import { IPC } from '@shared/ipc'
 import type { AddServicePayload } from '@shared/types'
 import { Store } from './store'
 import { ServicesManager } from './services-manager'
 
 let mainWindow: BrowserWindow | null = null
+
+// Em dev, resolve a partir de out/main/index.js até a raiz do projeto. Em um app
+// empacotado o diretório build/ não é incluído nos recursos (electron-builder só o
+// usa para gerar os ícones da plataforma), então o caminho simplesmente não existe
+// e o ícone do sistema operacional (já embutido no pacote) é o que prevalece.
+const iconPath = join(__dirname, '../../build/icon.png')
+const appIcon = existsSync(iconPath) ? iconPath : undefined
 
 function createMainWindow(): void {
   mainWindow = new BrowserWindow({
@@ -15,6 +23,7 @@ function createMainWindow(): void {
     minHeight: 480,
     show: false,
     autoHideMenuBar: true,
+    icon: appIcon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -58,6 +67,10 @@ function createMainWindow(): void {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin' && appIcon) {
+    app.dock?.setIcon(appIcon)
+  }
+
   createMainWindow()
 
   app.on('activate', () => {

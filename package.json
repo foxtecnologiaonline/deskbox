@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "description": "Deskbox — organize seus apps de mensagem e produtividade em um só lugar.",
   "main": "./out/main/index.js",
-  "author": "Deskbox",
+  "author": {
+    "name": "Deskbox",
+    "email": "contato@deskbox.app"
+  },
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",

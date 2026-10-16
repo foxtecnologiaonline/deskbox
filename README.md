@@ -33,7 +33,7 @@ npm run dist:linux # empacota AppImage + .deb
 - **Workspaces**: agrupe serviços em espaços nomeados (ex.: "Trabalho", "Pessoal") e alterne entre eles pelo switcher no topo da sidebar.
 - **Hibernação automática**: serviços inativos por mais de 10 minutos são descarregados da memória (a sessão continua salva); reabrir reativa sob demanda. Ícones hibernados aparecem esmaecidos.
 - Tema claro/escuro para a interface do Deskbox.
-- Empacotamento via `electron-builder` (AppImage/deb no Linux, dmg no macOS, nsis no Windows).
+- Empacotamento via `electron-builder` (AppImage/deb no Linux, dmg no macOS, nsis no Windows), com ícone customizado próprio (`build/icon.{png,ico,icns}`).
 
 ## Roadmap
 
