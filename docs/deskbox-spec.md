@@ -116,3 +116,22 @@ Pedido do usuário: rodar em máquinas corporativas onde instalar programas é b
 - Criptografia local dos dados de sessão (hoje a senha mestre é só uma tela de privacidade, não criptografa os dados salvos em disco).
 - Auto-update.
 - Assinatura de código para distribuição (macOS/Windows).
+
+## v2 — Controle de celular (Android) dentro do Deskbox
+
+Ideia: embutir uma tela do celular como se fosse mais um "serviço" do Deskbox, com controle de toque/teclado real, não só espelhamento passivo.
+
+**Decisão de arquitetura (discutida, não implementada)**: modelo "estilo Chrome Remote Desktop invertido" — em vez do Deskbox puxar a tela do celular via ADB/USB (como o `scrcpy` faz), um **app companion Android** (produto novo e separado do Deskbox) roda no celular e *empurra* a própria tela pra fora:
+- Captura de tela via `MediaProjection` (API oficial, consentimento único, sem root).
+- Injeção de toque/gestos via `AccessibilityService` (API oficial — é como TeamViewer/AnyDesk fazem controle sem root no Android).
+- Transporte via **WebRTC**; o Deskbox vira um cliente simples (`<video>` nativo do Chromium, sem decodificar H.264 na mão).
+
+**Por que essa direção em vez de ADB/scrcpy puro**: sem cabo USB, sem precisar ativar "Opções do desenvolvedor" no celular (trava a maioria dos usuários leigos) — mais perto de uma experiência de produto real.
+
+**Custo adicional de escopo** (motivo de ficar pra v2, não nessa fase):
+- Um app Android de verdade pra manter (código, ficha na Play Store, assinatura de APK, revisão do Google) — não é "mais uma feature do Deskbox", é um segundo produto.
+- Pra funcionar fora da rede local (de qualquer lugar, tipo CRD de verdade): precisa de servidor de sinalização/relay próprio (infraestrutura que o projeto não tem hoje). Alternativa mais simples pra v2 inicial: só rede local, pareamento por QR code (sem precisar de servidor).
+- `AccessibilityService` passa por telas de consentimento mais rígidas no Android/Play Store (a API é comumente abusada por malware; precisa de fluxo de consentimento claro e bem explicado).
+- **iOS**: controle completo não é realista pra usuário comum (Apple só permite via MDM corporativo/dispositivo supervisionado). Espelhamento (só visualização, sem controle) seria possível via QuickTime, mas só no macOS.
+
+**Decisão em aberto pra quando essa v2 entrar em pauta**: só rede local (mais simples, sem servidor) vs. acesso de qualquer lugar (precisa de relay).
