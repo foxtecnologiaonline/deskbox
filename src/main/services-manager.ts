@@ -123,6 +123,9 @@ export class ServicesManager {
       } else if (input.key === 'Tab') {
         event.preventDefault()
         this.cycleService(input.shift ? -1 : 1)
+      } else if (input.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        this.window.webContents.send(IPC.OPEN_COMMAND_PALETTE)
       }
     })
   }
@@ -156,6 +159,28 @@ export class ServicesManager {
 
   getCatalog() {
     return CATALOG
+  }
+
+  /**
+   * Uso de memória (RAM, em MB) por serviço ativo, pra evidenciar o ganho real
+   * da hibernação. Cada BrowserView roda no seu próprio processo de renderer
+   * (partições diferentes forçam isolamento de processo no Chromium), então
+   * cruzamos o PID de cada webContents com app.getAppMetrics() pra achar o
+   * working set dele. Serviços hibernados não têm processo, então não entram
+   * no resultado (tratados como 0 no lado do renderer).
+   */
+  getMemoryUsage(): Record<string, number> {
+    const metrics = app.getAppMetrics()
+    const memoryByPid = new Map(metrics.map((metric) => [metric.pid, metric.memory.workingSetSize]))
+    const result: Record<string, number> = {}
+    for (const [instanceId, view] of this.views) {
+      const pid = view.webContents.getOSProcessId()
+      const workingSetKb = memoryByPid.get(pid)
+      if (workingSetKb !== undefined) {
+        result[instanceId] = Math.round(workingSetKb / 1024)
+      }
+    }
+    return result
   }
 
   /** Estado enriquecido com campos calculados em tempo de execução (ex.: hibernated). */
@@ -240,8 +265,15 @@ export class ServicesManager {
     return this.getEnrichedState()
   }
 
+  /**
+   * Também troca activeWorkspaceId quando o serviço pertence a outro workspace
+   * (ex.: salto direto pelo command palette) — sem isso, a sidebar continuaria
+   * filtrando pelo workspace antigo e o serviço ativo nem apareceria nela.
+   */
   selectService(instanceId: string): DeskboxState {
-    this.setState((s) => ({ ...s, activeInstanceId: instanceId }))
+    const service = this.getState().services.find((s) => s.instanceId === instanceId)
+    if (!service) return this.getEnrichedState()
+    this.setState((s) => ({ ...s, activeInstanceId: instanceId, activeWorkspaceId: service.workspaceId }))
     this.showInstance(instanceId)
     this.broadcastState()
     return this.getEnrichedState()

@@ -3,6 +3,7 @@ import type { CatalogEntry, DeskboxState, Theme } from '@shared/types'
 import Sidebar from './components/Sidebar'
 import AddServiceModal from './components/AddServiceModal'
 import NewWorkspaceModal from './components/NewWorkspaceModal'
+import CommandPalette from './components/CommandPalette'
 import EmptyState from './components/EmptyState'
 
 export default function App(): JSX.Element {
@@ -10,12 +11,35 @@ export default function App(): JSX.Element {
   const [catalog, setCatalog] = useState<CatalogEntry[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [memoryUsage, setMemoryUsage] = useState<Record<string, number>>({})
 
   useEffect(() => {
     window.deskbox.getState().then(setState)
     window.deskbox.getCatalog().then(setCatalog)
     const unsubscribe = window.deskbox.onStateChanged(setState)
     return unsubscribe
+  }, [])
+
+  // Só pra mostrar o ganho real da hibernação na sidebar; não precisa ser em
+  // tempo real, então um polling simples a cada 5s é suficiente.
+  useEffect(() => {
+    let cancelled = false
+    const poll = (): void => {
+      window.deskbox.getMemoryUsage().then((usage) => {
+        if (!cancelled) setMemoryUsage(usage)
+      })
+    }
+    poll()
+    const interval = setInterval(poll, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [])
+
+  useEffect(() => {
+    return window.deskbox.onOpenCommandPalette(() => setPaletteOpen(true))
   }, [])
 
   useEffect(() => {
@@ -32,7 +56,7 @@ export default function App(): JSX.Element {
   // stacking context da página), então os modais abaixo ficariam invisíveis atrás
   // do serviço ativo se o processo principal não desanexasse o BrowserView enquanto
   // o overlay estiver aberto (ver ServicesManager.setOverlayOpen).
-  const overlayOpen = modalOpen || workspaceModalOpen
+  const overlayOpen = modalOpen || workspaceModalOpen || paletteOpen
   useEffect(() => {
     window.deskbox.setOverlayOpen(overlayOpen)
   }, [overlayOpen])
@@ -71,11 +95,13 @@ export default function App(): JSX.Element {
         activeWorkspaceId={state.activeWorkspaceId}
         activeInstanceId={state.activeInstanceId}
         theme={state.theme}
+        memoryUsage={memoryUsage}
         onSelect={(id) => window.deskbox.selectService(id)}
         onRemove={(id) => window.deskbox.removeService(id)}
         onReorder={(order) => window.deskbox.reorderServices(order)}
         onAddClick={() => setModalOpen(true)}
         onThemeToggle={() => window.deskbox.setTheme(nextTheme[state.theme])}
+        onOpenPalette={() => setPaletteOpen(true)}
         onSelectWorkspace={(id) => window.deskbox.selectWorkspace(id)}
         onAddWorkspaceClick={() => setWorkspaceModalOpen(true)}
         onRemoveWorkspace={(id) => window.deskbox.removeWorkspace(id)}
@@ -93,6 +119,22 @@ export default function App(): JSX.Element {
       )}
       {workspaceModalOpen && (
         <NewWorkspaceModal onClose={() => setWorkspaceModalOpen(false)} onCreate={handleCreateWorkspace} />
+      )}
+      {paletteOpen && (
+        <CommandPalette
+          state={state}
+          onClose={() => setPaletteOpen(false)}
+          onSelectService={(id) => window.deskbox.selectService(id)}
+          onSelectWorkspace={(id) => window.deskbox.selectWorkspace(id)}
+          onAddService={() => {
+            setPaletteOpen(false)
+            setModalOpen(true)
+          }}
+          onAddWorkspace={() => {
+            setPaletteOpen(false)
+            setWorkspaceModalOpen(true)
+          }}
+        />
       )}
     </div>
   )

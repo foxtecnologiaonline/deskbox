@@ -51,8 +51,10 @@ Uma revisão de código (`/code-review`) sobre o commit dos ícones + auditoria 
 
 ## Funcionalidades adicionais pós-MVP
 
-- **Atalhos de teclado globais**: `Ctrl/Cmd+1`..`9` pula direto pro N-ésimo serviço do workspace ativo; `Ctrl/Cmd+Tab` / `Ctrl/Cmd+Shift+Tab` cicla entre eles. Implementado via `before-input-event` em cada `WebContents` (janela principal + cada `BrowserView`) — ouvir `keydown` só no React não bastaria, já que cada serviço tem seu próprio foco de teclado nativo, independente do DOM da sidebar.
+- **Atalhos de teclado globais**: `Ctrl/Cmd+1`..`9` pula direto pro N-ésimo serviço do workspace ativo; `Ctrl/Cmd+Tab` / `Ctrl/Cmd+Shift+Tab` cicla entre eles; `Ctrl/Cmd+K` abre o command palette. Implementado via `before-input-event` em cada `WebContents` (janela principal + cada `BrowserView`) — ouvir `keydown` só no React não bastaria, já que cada serviço tem seu próprio foco de teclado nativo, independente do DOM da sidebar.
 - **Tema de 3 estados**: o botão de tema agora cicla `sistema → claro → escuro → sistema` (antes alternava só claro/escuro, sem como voltar a seguir o SO).
+- **Command palette** (`Ctrl/Cmd+K` ou botão de lupa no rodapé da sidebar): busca unificada por serviços (de qualquer workspace, não só o ativo), workspaces e ações rápidas (adicionar serviço, criar workspace). Selecionar um serviço de outro workspace troca `activeWorkspaceId` junto (correção necessária em `ServicesManager.selectService`, que antes só atualizava `activeInstanceId` e deixava o estado inconsistente nesse caso).
+- **Indicador de uso de memória**: `ServicesManager.getMemoryUsage()` cruza o PID de cada `BrowserView` (`webContents.getOSProcessId()`) com `app.getAppMetrics()` pra estimar o RAM por serviço. Renderer faz polling a cada 5s; aparece no tooltip de cada ícone e como total agregado no rodapé da sidebar — só conta serviços ativos (hibernados não têm processo), tornando visível o ganho real da hibernação.
 
 ## Fora do escopo (próximas versões)
 - CSS/JS customizado por serviço.

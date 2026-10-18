@@ -11,5 +11,7 @@ export const IPC = {
   ADD_WORKSPACE: 'deskbox:add-workspace',
   REMOVE_WORKSPACE: 'deskbox:remove-workspace',
   SELECT_WORKSPACE: 'deskbox:select-workspace',
-  SET_OVERLAY_OPEN: 'deskbox:set-overlay-open'
+  SET_OVERLAY_OPEN: 'deskbox:set-overlay-open',
+  OPEN_COMMAND_PALETTE: 'deskbox:open-command-palette',
+  GET_MEMORY_USAGE: 'deskbox:get-memory-usage'
 } as const

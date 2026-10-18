@@ -12,11 +12,13 @@ interface SidebarProps {
   activeWorkspaceId: string
   activeInstanceId: string | null
   theme: Theme
+  memoryUsage: Record<string, number>
   onSelect: (instanceId: string) => void
   onRemove: (instanceId: string) => void
   onReorder: (order: string[]) => void
   onAddClick: () => void
   onThemeToggle: () => void
+  onOpenPalette: () => void
   onSelectWorkspace: (workspaceId: string) => void
   onAddWorkspaceClick: () => void
   onRemoveWorkspace: (workspaceId: string) => void
@@ -28,17 +30,20 @@ export default function Sidebar({
   activeWorkspaceId,
   activeInstanceId,
   theme,
+  memoryUsage,
   onSelect,
   onRemove,
   onReorder,
   onAddClick,
   onThemeToggle,
+  onOpenPalette,
   onSelectWorkspace,
   onAddWorkspaceClick,
   onRemoveWorkspace
 }: SidebarProps): JSX.Element {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const sorted = [...services].sort((a, b) => a.order - b.order)
+  const totalMemoryMb = Object.values(memoryUsage).reduce((sum, mb) => sum + mb, 0)
 
   function handleDrop(targetId: string): void {
     if (!draggingId || draggingId === targetId) return
@@ -70,7 +75,13 @@ export default function Sidebar({
             onDragStart={() => setDraggingId(service.instanceId)}
             onDragOver={(e) => e.preventDefault()}
             onDrop={() => handleDrop(service.instanceId)}
-            title={service.hibernated ? `${service.name} (hibernado — clique para reativar)` : service.name}
+            title={
+              service.hibernated
+                ? `${service.name} (hibernado — clique para reativar)`
+                : memoryUsage[service.instanceId] !== undefined
+                  ? `${service.name} — ${memoryUsage[service.instanceId]} MB`
+                  : service.name
+            }
           >
             <button className="service-icon" onClick={() => onSelect(service.instanceId)}>
               <img src={faviconUrl(service.domain)} alt={service.name} />
@@ -95,6 +106,14 @@ export default function Sidebar({
         </button>
       </div>
       <div className="sidebar-footer">
+        {totalMemoryMb > 0 && (
+          <span className="memory-total" title="Uso de memória dos serviços ativos (hibernados não contam)">
+            {totalMemoryMb} MB
+          </span>
+        )}
+        <button className="palette-trigger" onClick={onOpenPalette} title="Busca rápida (Ctrl/Cmd+K)">
+          🔍
+        </button>
         <button className="theme-toggle" onClick={onThemeToggle} title={`Tema: ${THEME_LABEL[theme]} (clique para trocar)`}>
           {THEME_ICON[theme]}
         </button>

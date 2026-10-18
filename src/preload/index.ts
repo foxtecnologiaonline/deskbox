@@ -16,10 +16,16 @@ const api = {
   selectWorkspace: (workspaceId: string): Promise<DeskboxState> =>
     ipcRenderer.invoke(IPC.SELECT_WORKSPACE, workspaceId),
   setOverlayOpen: (open: boolean): Promise<void> => ipcRenderer.invoke(IPC.SET_OVERLAY_OPEN, open),
+  getMemoryUsage: (): Promise<Record<string, number>> => ipcRenderer.invoke(IPC.GET_MEMORY_USAGE),
   onStateChanged: (callback: (state: DeskboxState) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: DeskboxState): void => callback(state)
     ipcRenderer.on(IPC.STATE_CHANGED, listener)
     return () => ipcRenderer.removeListener(IPC.STATE_CHANGED, listener)
+  },
+  onOpenCommandPalette: (callback: () => void): (() => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on(IPC.OPEN_COMMAND_PALETTE, listener)
+    return () => ipcRenderer.removeListener(IPC.OPEN_COMMAND_PALETTE, listener)
   }
 }
 
