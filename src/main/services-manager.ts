@@ -25,6 +25,8 @@ export class ServicesManager {
   private webContentsIdToInstance = new Map<number, string>()
   private lastActiveAt = new Map<string, number>()
   private currentlyShownInstanceId: string | null = null
+  /** true enquanto um modal do renderer (overlay React) precisa ficar visível. */
+  private overlayOpen = false
 
   constructor(
     window: BrowserWindow,
@@ -66,7 +68,7 @@ export class ServicesManager {
   rebindWindow(window: BrowserWindow): void {
     this.window = window
     this.attachWindowListeners()
-    if (this.currentlyShownInstanceId) {
+    if (!this.overlayOpen && this.currentlyShownInstanceId) {
       const view = this.views.get(this.currentlyShownInstanceId)
       if (view) {
         this.window.setBrowserView(view)
@@ -76,8 +78,67 @@ export class ServicesManager {
     this.broadcastState()
   }
 
+  /**
+   * Um BrowserView sempre renderiza por cima do DOM da janela, não importa o
+   * z-index do CSS — é uma camada nativa separada, não parte do stacking
+   * context da página. Por isso, qualquer overlay do renderer (modal de
+   * adicionar serviço, novo workspace) fica invisível atrás do serviço ativo
+   * a menos que o BrowserView seja desanexado enquanto o overlay está aberto.
+   */
+  setOverlayOpen(open: boolean): void {
+    this.overlayOpen = open
+    if (open) {
+      this.window.setBrowserView(null)
+      return
+    }
+    if (this.currentlyShownInstanceId) {
+      const view = this.views.get(this.currentlyShownInstanceId)
+      if (view) {
+        this.window.setBrowserView(view)
+        this.layout()
+      }
+    }
+  }
+
   private attachWindowListeners(): void {
     this.window.on('resize', () => this.layout())
+    this.registerShortcuts(this.window.webContents)
+  }
+
+  /**
+   * Atalhos globais de troca de serviço (Ctrl/Cmd+1..9, Ctrl/Cmd+Tab). Como cada
+   * serviço roda num BrowserView com seu próprio foco de teclado, ouvir keydown
+   * no React (sidebar) só funcionaria quando a sidebar estivesse focada — por
+   * isso interceptamos em cada WebContents (janela principal + cada BrowserView)
+   * via before-input-event, que o Electron dispara antes da página ver a tecla.
+   */
+  private registerShortcuts(webContents: Electron.WebContents): void {
+    webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return
+      const mod = input.control || input.meta
+      if (!mod) return
+      if (input.key >= '1' && input.key <= '9') {
+        event.preventDefault()
+        this.selectServiceByIndex(Number(input.key) - 1)
+      } else if (input.key === 'Tab') {
+        event.preventDefault()
+        this.cycleService(input.shift ? -1 : 1)
+      }
+    })
+  }
+
+  private selectServiceByIndex(index: number): void {
+    const services = this.servicesInWorkspace(this.getState().activeWorkspaceId)
+    const target = services[index]
+    if (target) this.selectService(target.instanceId)
+  }
+
+  private cycleService(delta: number): void {
+    const services = this.servicesInWorkspace(this.getState().activeWorkspaceId)
+    if (services.length === 0) return
+    const currentIndex = services.findIndex((s) => s.instanceId === this.getState().activeInstanceId)
+    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + delta + services.length) % services.length
+    this.selectService(services[nextIndex].instanceId)
   }
 
   private handleUnreadMessage = (event: Electron.IpcMainEvent, count: number): void => {
@@ -263,6 +324,7 @@ export class ServicesManager {
       }
     })
     view.webContents.loadURL(instance.url)
+    this.registerShortcuts(view.webContents)
     this.views.set(instance.instanceId, view)
     this.webContentsIdToInstance.set(view.webContents.id, instance.instanceId)
   }
@@ -282,8 +344,10 @@ export class ServicesManager {
     if (!view) return
     this.lastActiveAt.set(instanceId, Date.now())
     this.currentlyShownInstanceId = instanceId
-    this.window.setBrowserView(view)
-    this.layout()
+    if (!this.overlayOpen) {
+      this.window.setBrowserView(view)
+      this.layout()
+    }
   }
 
   private hideActiveView(): void {

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import type { CatalogEntry, DeskboxState } from '@shared/types'
+import type { CatalogEntry, DeskboxState, Theme } from '@shared/types'
 import Sidebar from './components/Sidebar'
 import AddServiceModal from './components/AddServiceModal'
 import NewWorkspaceModal from './components/NewWorkspaceModal'
@@ -28,6 +28,15 @@ export default function App(): JSX.Element {
     }
   }, [state?.theme])
 
+  // Um BrowserView sempre fica por cima do DOM da janela (camada nativa, fora do
+  // stacking context da página), então os modais abaixo ficariam invisíveis atrás
+  // do serviço ativo se o processo principal não desanexasse o BrowserView enquanto
+  // o overlay estiver aberto (ver ServicesManager.setOverlayOpen).
+  const overlayOpen = modalOpen || workspaceModalOpen
+  useEffect(() => {
+    window.deskbox.setOverlayOpen(overlayOpen)
+  }, [overlayOpen])
+
   const servicesInActiveWorkspace = useMemo(
     () => (state ? state.services.filter((service) => service.workspaceId === state.activeWorkspaceId) : []),
     [state]
@@ -52,6 +61,8 @@ export default function App(): JSX.Element {
     return <div className="app-loading">Carregando…</div>
   }
 
+  const nextTheme: Record<Theme, Theme> = { system: 'light', light: 'dark', dark: 'system' }
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -64,10 +75,7 @@ export default function App(): JSX.Element {
         onRemove={(id) => window.deskbox.removeService(id)}
         onReorder={(order) => window.deskbox.reorderServices(order)}
         onAddClick={() => setModalOpen(true)}
-        onThemeToggle={() => {
-          const next = state.theme === 'dark' ? 'light' : 'dark'
-          window.deskbox.setTheme(next)
-        }}
+        onThemeToggle={() => window.deskbox.setTheme(nextTheme[state.theme])}
         onSelectWorkspace={(id) => window.deskbox.selectWorkspace(id)}
         onAddWorkspaceClick={() => setWorkspaceModalOpen(true)}
         onRemoveWorkspace={(id) => window.deskbox.removeWorkspace(id)}

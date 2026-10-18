@@ -3,6 +3,9 @@ import type { ServiceInstance, Theme, Workspace } from '@shared/types'
 import { faviconUrl } from '@shared/favicon'
 import WorkspaceSwitcher from './WorkspaceSwitcher'
 
+const THEME_ICON: Record<Theme, string> = { system: '🖥️', light: '☀️', dark: '🌙' }
+const THEME_LABEL: Record<Theme, string> = { system: 'Sistema', light: 'Claro', dark: 'Escuro' }
+
 interface SidebarProps {
   services: ServiceInstance[]
   workspaces: Workspace[]
@@ -92,8 +95,8 @@ export default function Sidebar({
         </button>
       </div>
       <div className="sidebar-footer">
-        <button className="theme-toggle" onClick={onThemeToggle} title="Alternar tema">
-          {theme === 'dark' ? '☀️' : '🌙'}
+        <button className="theme-toggle" onClick={onThemeToggle} title={`Tema: ${THEME_LABEL[theme]} (clique para trocar)`}>
+          {THEME_ICON[theme]}
         </button>
       </div>
     </aside>

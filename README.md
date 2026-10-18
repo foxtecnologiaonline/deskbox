@@ -32,7 +32,8 @@ npm run dist:linux # empacota AppImage + .deb
 - Badge de não lidos por serviço (detectado a partir do título da aba) agregado no ícone do app.
 - **Workspaces**: agrupe serviços em espaços nomeados (ex.: "Trabalho", "Pessoal") e alterne entre eles pelo switcher no topo da sidebar.
 - **Hibernação automática**: serviços inativos por mais de 10 minutos são descarregados da memória (a sessão continua salva); reabrir reativa sob demanda. Ícones hibernados aparecem esmaecidos.
-- Tema claro/escuro para a interface do Deskbox.
+- Tema de 3 estados (sistema/claro/escuro) para a interface do Deskbox.
+- Atalhos de teclado: `Ctrl/Cmd+1..9` pula pro N-ésimo serviço, `Ctrl/Cmd+Tab` (+`Shift` pra voltar) cicla entre eles — funcionam mesmo com um serviço em foco.
 - Empacotamento via `electron-builder` (AppImage/deb no Linux, dmg no macOS, nsis no Windows), com ícone customizado próprio (`build/icon.{png,ico,icns}`).
 
 ## Roadmap

@@ -15,6 +15,7 @@ const api = {
     ipcRenderer.invoke(IPC.REMOVE_WORKSPACE, workspaceId),
   selectWorkspace: (workspaceId: string): Promise<DeskboxState> =>
     ipcRenderer.invoke(IPC.SELECT_WORKSPACE, workspaceId),
+  setOverlayOpen: (open: boolean): Promise<void> => ipcRenderer.invoke(IPC.SET_OVERLAY_OPEN, open),
   onStateChanged: (callback: (state: DeskboxState) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: DeskboxState): void => callback(state)
     ipcRenderer.on(IPC.STATE_CHANGED, listener)

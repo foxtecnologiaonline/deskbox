@@ -81,6 +81,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.ADD_WORKSPACE, (_event, name: string) => manager!.addWorkspace(name))
   ipcMain.handle(IPC.REMOVE_WORKSPACE, (_event, workspaceId: string) => manager!.removeWorkspace(workspaceId))
   ipcMain.handle(IPC.SELECT_WORKSPACE, (_event, workspaceId: string) => manager!.selectWorkspace(workspaceId))
+  ipcMain.handle(IPC.SET_OVERLAY_OPEN, (_event, open: boolean) => manager!.setOverlayOpen(open))
 }
 
 app.whenReady().then(() => {

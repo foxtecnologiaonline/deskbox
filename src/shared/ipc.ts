@@ -10,5 +10,6 @@ export const IPC = {
   SERVICE_UNREAD: 'deskbox:service-unread',
   ADD_WORKSPACE: 'deskbox:add-workspace',
   REMOVE_WORKSPACE: 'deskbox:remove-workspace',
-  SELECT_WORKSPACE: 'deskbox:select-workspace'
+  SELECT_WORKSPACE: 'deskbox:select-workspace',
+  SET_OVERLAY_OPEN: 'deskbox:set-overlay-open'
 } as const
