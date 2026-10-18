@@ -10,7 +10,9 @@ const DEFAULT_STATE: DeskboxState = {
   workspaces: [{ id: DEFAULT_WORKSPACE_ID, name: 'Geral' }],
   activeWorkspaceId: DEFAULT_WORKSPACE_ID,
   activeInstanceId: null,
-  theme: 'system'
+  theme: 'system',
+  passwordHash: null,
+  proxy: null
 }
 
 export class Store {

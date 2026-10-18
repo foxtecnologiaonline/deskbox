@@ -37,7 +37,9 @@ npm run dist:linux # empacota AppImage + .deb
 - Command palette: busca unificada por serviços, workspaces e ações rápidas.
 - Indicador de memória por serviço (tooltip) e total agregado na sidebar, pra ver o ganho real da hibernação.
 - Empacotamento via `electron-builder` (AppImage/deb no Linux, dmg no macOS, nsis no Windows), com ícone customizado próprio (`build/icon.{png,ico,icns}`).
+- **Senha mestre**: tranca o app com uma tela de bloqueio (hash salgado, nunca em texto puro); botão de "trancar agora" e definir/trocar/remover senha no modal de Configurações (ícone de engrenagem na sidebar).
+- **Proxy configurável**: regras de proxy globais (`http=...;https=...`) aplicadas a todas as sessões, também pelo modal de Configurações.
 
 ## Roadmap
 
-Ver seção "Fora do escopo" em `docs/deskbox-spec.md`: CSS/JS customizado por serviço, sincronização entre dispositivos, bloqueio por senha mestre, auto-update, busca rápida (command palette), ícones customizados e assinatura de código.
+Ver seção "Fora do escopo" em `docs/deskbox-spec.md`: CSS/JS customizado por serviço, proxy por serviço, sincronização entre dispositivos, criptografia local, auto-update e assinatura de código.

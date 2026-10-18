@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { IPC } from '@shared/ipc'
-import type { AddServicePayload } from '@shared/types'
+import type { AddServicePayload, ProxyConfig, SetPasswordPayload } from '@shared/types'
 import { Store } from './store'
 import { ServicesManager } from './services-manager'
 
@@ -83,6 +83,12 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.SELECT_WORKSPACE, (_event, workspaceId: string) => manager!.selectWorkspace(workspaceId))
   ipcMain.handle(IPC.SET_OVERLAY_OPEN, (_event, open: boolean) => manager!.setOverlayOpen(open))
   ipcMain.handle(IPC.GET_MEMORY_USAGE, () => manager!.getMemoryUsage())
+  ipcMain.handle(IPC.UNLOCK, (_event, password: string) => manager!.unlock(password))
+  ipcMain.handle(IPC.LOCK_NOW, () => manager!.lockNow())
+  ipcMain.handle(IPC.SET_PASSWORD, (_event, payload: SetPasswordPayload) =>
+    manager!.setPassword(payload.newPassword, payload.currentPassword)
+  )
+  ipcMain.handle(IPC.SET_PROXY, (_event, config: ProxyConfig | null) => manager!.setProxy(config))
 }
 
 app.whenReady().then(() => {

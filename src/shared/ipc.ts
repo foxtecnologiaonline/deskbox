@@ -13,5 +13,9 @@ export const IPC = {
   SELECT_WORKSPACE: 'deskbox:select-workspace',
   SET_OVERLAY_OPEN: 'deskbox:set-overlay-open',
   OPEN_COMMAND_PALETTE: 'deskbox:open-command-palette',
-  GET_MEMORY_USAGE: 'deskbox:get-memory-usage'
+  GET_MEMORY_USAGE: 'deskbox:get-memory-usage',
+  UNLOCK: 'deskbox:unlock',
+  LOCK_NOW: 'deskbox:lock-now',
+  SET_PASSWORD: 'deskbox:set-password',
+  SET_PROXY: 'deskbox:set-proxy'
 } as const

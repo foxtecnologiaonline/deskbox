@@ -56,10 +56,15 @@ Uma revisão de código (`/code-review`) sobre o commit dos ícones + auditoria 
 - **Command palette** (`Ctrl/Cmd+K` ou botão de lupa no rodapé da sidebar): busca unificada por serviços (de qualquer workspace, não só o ativo), workspaces e ações rápidas (adicionar serviço, criar workspace). Selecionar um serviço de outro workspace troca `activeWorkspaceId` junto (correção necessária em `ServicesManager.selectService`, que antes só atualizava `activeInstanceId` e deixava o estado inconsistente nesse caso).
 - **Indicador de uso de memória**: `ServicesManager.getMemoryUsage()` cruza o PID de cada `BrowserView` (`webContents.getOSProcessId()`) com `app.getAppMetrics()` pra estimar o RAM por serviço. Renderer faz polling a cada 5s; aparece no tooltip de cada ícone e como total agregado no rodapé da sidebar — só conta serviços ativos (hibernados não têm processo), tornando visível o ganho real da hibernação.
 
+## Fase 3 — Recursos avançados
+
+- **Senha mestre / tela de bloqueio**: hash salgado via `crypto.scryptSync` (`src/main/password.ts`, comparação com `timingSafeEqual`) — nunca guarda a senha em texto puro, e o hash (`passwordHash`) nunca sai do processo principal (o renderer só recebe `hasPassword: boolean`, ver `RendererState` em `src/shared/types.ts`). O app começa trancado em todo boot se houver senha configurada; trancar/destravar reusa o mesmo mecanismo de desanexar o `BrowserView` já usado pros modais (`ServicesManager.reattachActiveViewIfAllowed`). Botão de "Trancar agora" na sidebar (só aparece se há senha) e gestão completa (definir/trocar/remover) no modal de Configurações. **Limitação conhecida**: sem senha esquecida/recuperação — a única saída é apagar o arquivo de config (perde também os serviços), deixado assim de propósito porque é só uma tela de privacidade local, não uma defesa contra um atacante sofisticado.
+- **Proxy configurável**: global por enquanto (um único `proxyRules` pra todas as sessões — não há granularidade por serviço ainda). Aplicado via `session.setProxy()` na sessão default e em cada `BrowserView` já existente; novas sessões de serviço aplicam o proxy atual antes do primeiro `loadURL` (evita vazar a primeira requisição fora do proxy). Configurável no modal de Configurações.
+
 ## Fora do escopo (próximas versões)
 - CSS/JS customizado por serviço.
-- Sincronização de configuração entre dispositivos (conta Deskbox).
-- Bloqueio por senha mestre / criptografia local.
+- Proxy por serviço (hoje é só global).
+- Sincronização de configuração entre dispositivos (conta Deskbox) — decisão de arquitetura em aberto (backend próprio? Supabase/Firebase? sync via arquivo?).
+- Criptografia local dos dados de sessão (hoje a senha mestre é só uma tela de privacidade, não criptografa os dados salvos em disco).
 - Auto-update.
-- Busca rápida (command palette) entre serviços.
-- Ícones de app customizados e assinatura de código para distribuição.
+- Assinatura de código para distribuição (macOS/Windows).

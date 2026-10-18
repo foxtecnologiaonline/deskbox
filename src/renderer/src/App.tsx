@@ -1,17 +1,20 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import type { CatalogEntry, DeskboxState, Theme } from '@shared/types'
+import type { CatalogEntry, RendererState, Theme } from '@shared/types'
 import Sidebar from './components/Sidebar'
 import AddServiceModal from './components/AddServiceModal'
 import NewWorkspaceModal from './components/NewWorkspaceModal'
 import CommandPalette from './components/CommandPalette'
+import SettingsModal from './components/SettingsModal'
+import LockScreen from './components/LockScreen'
 import EmptyState from './components/EmptyState'
 
 export default function App(): JSX.Element {
-  const [state, setState] = useState<DeskboxState | null>(null)
+  const [state, setState] = useState<RendererState | null>(null)
   const [catalog, setCatalog] = useState<CatalogEntry[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [memoryUsage, setMemoryUsage] = useState<Record<string, number>>({})
 
   useEffect(() => {
@@ -56,7 +59,7 @@ export default function App(): JSX.Element {
   // stacking context da página), então os modais abaixo ficariam invisíveis atrás
   // do serviço ativo se o processo principal não desanexasse o BrowserView enquanto
   // o overlay estiver aberto (ver ServicesManager.setOverlayOpen).
-  const overlayOpen = modalOpen || workspaceModalOpen || paletteOpen
+  const overlayOpen = modalOpen || workspaceModalOpen || paletteOpen || settingsOpen
   useEffect(() => {
     window.deskbox.setOverlayOpen(overlayOpen)
   }, [overlayOpen])
@@ -85,6 +88,10 @@ export default function App(): JSX.Element {
     return <div className="app-loading">Carregando…</div>
   }
 
+  if (state.locked) {
+    return <LockScreen />
+  }
+
   const nextTheme: Record<Theme, Theme> = { system: 'light', light: 'dark', dark: 'system' }
 
   return (
@@ -95,6 +102,7 @@ export default function App(): JSX.Element {
         activeWorkspaceId={state.activeWorkspaceId}
         activeInstanceId={state.activeInstanceId}
         theme={state.theme}
+        hasPassword={state.hasPassword}
         memoryUsage={memoryUsage}
         onSelect={(id) => window.deskbox.selectService(id)}
         onRemove={(id) => window.deskbox.removeService(id)}
@@ -102,6 +110,8 @@ export default function App(): JSX.Element {
         onAddClick={() => setModalOpen(true)}
         onThemeToggle={() => window.deskbox.setTheme(nextTheme[state.theme])}
         onOpenPalette={() => setPaletteOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onLockNow={() => window.deskbox.lockNow()}
         onSelectWorkspace={(id) => window.deskbox.selectWorkspace(id)}
         onAddWorkspaceClick={() => setWorkspaceModalOpen(true)}
         onRemoveWorkspace={(id) => window.deskbox.removeWorkspace(id)}
@@ -135,6 +145,9 @@ export default function App(): JSX.Element {
             setWorkspaceModalOpen(true)
           }}
         />
+      )}
+      {settingsOpen && (
+        <SettingsModal hasPassword={state.hasPassword} proxy={state.proxy} onClose={() => setSettingsOpen(false)} />
       )}
     </div>
   )

@@ -1,9 +1,17 @@
 import { randomUUID } from 'crypto'
 import { BrowserView, BrowserWindow, ipcMain, session, app } from 'electron'
 import { join } from 'path'
-import type { AddServicePayload, DeskboxState, ServiceInstance } from '@shared/types'
+import type {
+  AddServicePayload,
+  DeskboxState,
+  ProxyConfig,
+  RendererState,
+  ServiceInstance,
+  SetPasswordResult
+} from '@shared/types'
 import { IPC } from '@shared/ipc'
 import { CATALOG, findCatalogEntry } from './catalog'
+import { hashPassword, verifyPassword } from './password'
 
 const SIDEBAR_WIDTH = 72
 const HIBERNATE_AFTER_MS = 10 * 60 * 1000
@@ -27,6 +35,8 @@ export class ServicesManager {
   private currentlyShownInstanceId: string | null = null
   /** true enquanto um modal do renderer (overlay React) precisa ficar visível. */
   private overlayOpen = false
+  /** true quando o app está trancado por senha mestre — nenhum BrowserView é exibido. */
+  private locked = false
 
   constructor(
     window: BrowserWindow,
@@ -41,6 +51,7 @@ export class ServicesManager {
   /** Configuração única, válida para a vida inteira do app (um só Store/ServicesManager). */
   init(): void {
     const state = this.getState()
+    this.locked = state.passwordHash !== null
     const activeExists = state.services.some((s) => s.instanceId === state.activeInstanceId)
     if (state.activeInstanceId && activeExists) {
       this.showInstance(state.activeInstanceId)
@@ -68,13 +79,7 @@ export class ServicesManager {
   rebindWindow(window: BrowserWindow): void {
     this.window = window
     this.attachWindowListeners()
-    if (!this.overlayOpen && this.currentlyShownInstanceId) {
-      const view = this.views.get(this.currentlyShownInstanceId)
-      if (view) {
-        this.window.setBrowserView(view)
-      }
-    }
-    this.layout()
+    this.reattachActiveViewIfAllowed()
     this.broadcastState()
   }
 
@@ -91,13 +96,83 @@ export class ServicesManager {
       this.window.setBrowserView(null)
       return
     }
-    if (this.currentlyShownInstanceId) {
-      const view = this.views.get(this.currentlyShownInstanceId)
-      if (view) {
-        this.window.setBrowserView(view)
-        this.layout()
+    this.reattachActiveViewIfAllowed()
+  }
+
+  /** Reanexa o BrowserView ativo à janela, a menos que um overlay/lock esteja impedindo. */
+  private reattachActiveViewIfAllowed(): void {
+    if (this.overlayOpen || this.locked || !this.currentlyShownInstanceId) return
+    const view = this.views.get(this.currentlyShownInstanceId)
+    if (view) {
+      this.window.setBrowserView(view)
+      this.layout()
+    }
+  }
+
+  /** true se existe uma senha mestre configurada (nunca expõe o hash). */
+  hasPassword(): boolean {
+    return this.getState().passwordHash !== null
+  }
+
+  /** Confere a senha e destrava o app se correta. Sem senha configurada, sempre destrava. */
+  unlock(password: string): boolean {
+    const hash = this.getState().passwordHash
+    if (!hash || verifyPassword(password, hash)) {
+      this.locked = false
+      this.reattachActiveViewIfAllowed()
+      this.broadcastState()
+      return true
+    }
+    return false
+  }
+
+  /** Tranca o app na hora (sem efeito se nenhuma senha estiver configurada). */
+  lockNow(): void {
+    if (!this.hasPassword()) return
+    this.locked = true
+    this.window.setBrowserView(null)
+    this.broadcastState()
+  }
+
+  /**
+   * Define, troca ou remove a senha mestre. Se já existe uma senha configurada,
+   * exige a senha atual correta pra trocar ou remover (evita que qualquer IPC
+   * destrave/altere a proteção sem confirmar que quem está pedindo já sabe a
+   * senha vigente).
+   */
+  setPassword(newPassword: string | null, currentPassword?: string): SetPasswordResult {
+    const currentHash = this.getState().passwordHash
+    if (currentHash) {
+      if (!currentPassword || !verifyPassword(currentPassword, currentHash)) {
+        return { ok: false, error: 'Senha atual incorreta.' }
       }
     }
+    const nextHash = newPassword ? hashPassword(newPassword) : null
+    this.setState((s) => ({ ...s, passwordHash: nextHash }))
+    this.broadcastState()
+    return { ok: true }
+  }
+
+  /**
+   * Proxy global (todas as sessões, inclusive novos serviços). Aplicado à sessão
+   * default e a cada BrowserView já existente; `createViewForInstance` aplica o
+   * mesmo proxy a sessões novas.
+   */
+  async setProxy(config: ProxyConfig | null): Promise<RendererState> {
+    this.setState((s) => ({ ...s, proxy: config }))
+    const tasks = [this.applyProxyToSession(session.defaultSession)]
+    for (const view of this.views.values()) {
+      tasks.push(this.applyProxyToSession(view.webContents.session))
+    }
+    await Promise.all(tasks)
+    this.broadcastState()
+    return this.getEnrichedState()
+  }
+
+  private async applyProxyToSession(target: Electron.Session): Promise<void> {
+    const proxy = this.getState().proxy
+    const proxyRules = proxy?.rules.trim() || ''
+    await target.setProxy({ proxyRules })
   }
 
   private attachWindowListeners(): void {
@@ -183,11 +258,16 @@ export class ServicesManager {
     return result
   }
 
-  /** Estado enriquecido com campos calculados em tempo de execução (ex.: hibernated). */
-  getEnrichedState(): DeskboxState {
-    const state = this.getState()
+  /**
+   * Estado enviado ao renderer: campos calculados em tempo de execução (hibernated,
+   * locked) e nunca inclui passwordHash — vira só o booleano hasPassword.
+   */
+  getEnrichedState(): RendererState {
+    const { passwordHash, ...state } = this.getState()
     return {
       ...state,
+      hasPassword: passwordHash !== null,
+      locked: this.locked,
       services: state.services.map((service) => ({
         ...service,
         hibernated: !this.views.has(service.instanceId)
@@ -195,7 +275,7 @@ export class ServicesManager {
     }
   }
 
-  addService(payload: AddServicePayload): DeskboxState {
+  addService(payload: AddServicePayload): RendererState {
     const catalogEntry = payload.catalogId ? findCatalogEntry(payload.catalogId) : undefined
     const name = catalogEntry?.name ?? payload.name ?? 'Site personalizado'
     const url = catalogEntry?.url ?? payload.url
@@ -227,7 +307,7 @@ export class ServicesManager {
     return this.getEnrichedState()
   }
 
-  removeService(instanceId: string): DeskboxState {
+  removeService(instanceId: string): RendererState {
     this.destroyView(instanceId)
     const state = this.setState((s) => {
       const removed = s.services.find((service) => service.instanceId === instanceId)
@@ -252,7 +332,7 @@ export class ServicesManager {
     return this.getEnrichedState()
   }
 
-  reorderServices(order: string[]): DeskboxState {
+  reorderServices(order: string[]): RendererState {
     this.setState((s) => ({
       ...s,
       services: s.services.map((service) =>
@@ -270,7 +350,7 @@ export class ServicesManager {
    * (ex.: salto direto pelo command palette) — sem isso, a sidebar continuaria
    * filtrando pelo workspace antigo e o serviço ativo nem apareceria nela.
    */
-  selectService(instanceId: string): DeskboxState {
+  selectService(instanceId: string): RendererState {
     const service = this.getState().services.find((s) => s.instanceId === instanceId)
     if (!service) return this.getEnrichedState()
     this.setState((s) => ({ ...s, activeInstanceId: instanceId, activeWorkspaceId: service.workspaceId }))
@@ -279,20 +359,20 @@ export class ServicesManager {
     return this.getEnrichedState()
   }
 
-  setTheme(theme: DeskboxState['theme']): DeskboxState {
+  setTheme(theme: DeskboxState['theme']): RendererState {
     this.setState((s) => ({ ...s, theme }))
     this.broadcastState()
     return this.getEnrichedState()
   }
 
-  addWorkspace(name: string): DeskboxState {
+  addWorkspace(name: string): RendererState {
     const id = randomUUID()
     this.setState((s) => ({ ...s, workspaces: [...s.workspaces, { id, name: name.trim() || 'Workspace' }] }))
     this.selectWorkspace(id)
     return this.getEnrichedState()
   }
 
-  removeWorkspace(workspaceId: string): DeskboxState {
+  removeWorkspace(workspaceId: string): RendererState {
     const current = this.getState()
     if (current.workspaces.length <= 1) {
       // Nunca remove o último workspace restante.
@@ -322,7 +402,7 @@ export class ServicesManager {
     return this.getEnrichedState()
   }
 
-  selectWorkspace(workspaceId: string): DeskboxState {
+  selectWorkspace(workspaceId: string): RendererState {
     const state = this.setState((s) => {
       const firstService = this.servicesInWorkspace(workspaceId, s)[0]
       return { ...s, activeWorkspaceId: workspaceId, activeInstanceId: firstService?.instanceId ?? null }
@@ -355,7 +435,9 @@ export class ServicesManager {
         sandbox: false
       }
     })
-    view.webContents.loadURL(instance.url)
+    // Aplica o proxy global antes do primeiro carregamento, pra não vazar a
+    // primeira requisição fora do proxy configurado.
+    this.applyProxyToSession(partitionSession).finally(() => view.webContents.loadURL(instance.url))
     this.registerShortcuts(view.webContents)
     this.views.set(instance.instanceId, view)
     this.webContentsIdToInstance.set(view.webContents.id, instance.instanceId)
@@ -376,7 +458,7 @@ export class ServicesManager {
     if (!view) return
     this.lastActiveAt.set(instanceId, Date.now())
     this.currentlyShownInstanceId = instanceId
-    if (!this.overlayOpen) {
+    if (!this.overlayOpen && !this.locked) {
       this.window.setBrowserView(view)
       this.layout()
     }

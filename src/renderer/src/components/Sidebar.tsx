@@ -12,6 +12,7 @@ interface SidebarProps {
   activeWorkspaceId: string
   activeInstanceId: string | null
   theme: Theme
+  hasPassword: boolean
   memoryUsage: Record<string, number>
   onSelect: (instanceId: string) => void
   onRemove: (instanceId: string) => void
@@ -19,6 +20,8 @@ interface SidebarProps {
   onAddClick: () => void
   onThemeToggle: () => void
   onOpenPalette: () => void
+  onOpenSettings: () => void
+  onLockNow: () => void
   onSelectWorkspace: (workspaceId: string) => void
   onAddWorkspaceClick: () => void
   onRemoveWorkspace: (workspaceId: string) => void
@@ -30,6 +33,7 @@ export default function Sidebar({
   activeWorkspaceId,
   activeInstanceId,
   theme,
+  hasPassword,
   memoryUsage,
   onSelect,
   onRemove,
@@ -37,6 +41,8 @@ export default function Sidebar({
   onAddClick,
   onThemeToggle,
   onOpenPalette,
+  onOpenSettings,
+  onLockNow,
   onSelectWorkspace,
   onAddWorkspaceClick,
   onRemoveWorkspace
@@ -111,8 +117,16 @@ export default function Sidebar({
             {totalMemoryMb} MB
           </span>
         )}
+        {hasPassword && (
+          <button className="lock-trigger" onClick={onLockNow} title="Trancar agora">
+            🔒
+          </button>
+        )}
         <button className="palette-trigger" onClick={onOpenPalette} title="Busca rápida (Ctrl/Cmd+K)">
           🔍
+        </button>
+        <button className="settings-trigger" onClick={onOpenSettings} title="Configurações">
+          ⚙️
         </button>
         <button className="theme-toggle" onClick={onThemeToggle} title={`Tema: ${THEME_LABEL[theme]} (clique para trocar)`}>
           {THEME_ICON[theme]}

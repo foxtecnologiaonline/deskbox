@@ -208,7 +208,9 @@ html,
 }
 
 .theme-toggle,
-.palette-trigger {
+.palette-trigger,
+.settings-trigger,
+.lock-trigger {
   width: 36px;
   height: 36px;
   border-radius: 10px;
@@ -441,4 +443,101 @@ html,
 .palette-item-sublabel {
   opacity: 0.6;
   font-size: 11px;
+}
+
+.lock-screen {
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-content);
+}
+
+.lock-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  background: var(--modal-bg);
+  color: var(--text-primary);
+  padding: 32px;
+  border-radius: 14px;
+  width: 320px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.lock-icon {
+  font-size: 32px;
+}
+
+.lock-card h1 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.lock-input {
+  width: 100%;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text-primary);
+  font-size: 14px;
+  text-align: center;
+}
+
+.lock-card .primary-button {
+  width: 100%;
+}
+
+.lock-card .primary-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.lock-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin: 0;
+}
+
+.lock-hint {
+  font-size: 11px;
+  opacity: 0.5;
+  text-align: center;
+  margin: 4px 0 0;
+}
+
+.settings-modal {
+  width: 440px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.settings-section {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.settings-section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.settings-section h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.settings-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin: 0;
+}
+
+.settings-ok {
+  color: #3bc07a;
+  font-size: 12px;
+  margin: 0;
 }

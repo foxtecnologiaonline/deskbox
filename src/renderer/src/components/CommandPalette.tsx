@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DeskboxState } from '@shared/types'
+import type { RendererState } from '@shared/types'
 import { faviconUrl } from '@shared/favicon'
 
 interface CommandPaletteProps {
-  state: DeskboxState
+  state: RendererState
   onClose: () => void
   onSelectService: (instanceId: string) => void
   onSelectWorkspace: (workspaceId: string) => void
