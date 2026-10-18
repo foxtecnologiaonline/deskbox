@@ -6,6 +6,19 @@ import type { AddServicePayload, ProxyConfig, SetPasswordPayload } from '@shared
 import { Store } from './store'
 import { ServicesManager } from './services-manager'
 
+// Build portátil (electron-builder "portable" no Windows): ao rodar o .exe
+// direto de um pendrive/pasta, sem instalar, o electron-builder expõe a pasta
+// onde ele está em PORTABLE_EXECUTABLE_DIR. Redirecionamos userData pra lá
+// (em vez de %APPDATA%) pra que configuração e sessões dos serviços viajem
+// junto com o executável — nada fica gravado no computador usado, e o mesmo
+// pendrive mantém os logins ao trocar de máquina. Precisa rodar antes de
+// qualquer leitura de app.getPath('userData') — por isso logo no topo,
+// antes até da instância de Store.
+const portableDir = process.env['PORTABLE_EXECUTABLE_DIR']
+if (portableDir) {
+  app.setPath('userData', join(portableDir, 'DeskboxData'))
+}
+
 let mainWindow: BrowserWindow | null = null
 // Um só Store/ServicesManager para a vida inteira do app: no macOS, fechar todas
 // as janelas não encerra o processo (ver window-all-closed abaixo), e reabrir pelo

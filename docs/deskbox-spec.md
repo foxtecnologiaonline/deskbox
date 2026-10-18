@@ -86,6 +86,15 @@ Pedido explícito de compactar o build mantendo qualidade. Números reais medido
 
 A maior parte do tamanho final (~200 MB) é o próprio binário do Chromium/Electron — não compactável sem trocar de framework, fora do escopo de uma passada de otimização.
 
+## Distribuição sem instalação (ambientes corporativos restritos)
+
+Pedido do usuário: rodar em máquinas corporativas onde instalar programas é bloqueado por política.
+
+- **Windows portable**: `win.target` inclui `"portable"` além de `"nsis"` (`package.json`) — gera um `.exe` avulso que roda direto, sem instalador, sem elevação de admin, sem tocar no registro. Funciona de pasta local ou pendrive.
+- **Dados portáteis de verdade**: quando rodando via o build portable, o electron-builder expõe a variável de ambiente `PORTABLE_EXECUTABLE_DIR` (pasta onde está o `.exe`). `src/main/index.ts` detecta isso e redireciona `app.setPath('userData', ...)` pra uma pasta `DeskboxData` ao lado do executável, em vez de `%APPDATA%` — configuração e sessões de cada serviço (login do WhatsApp, Gmail etc., via `session.fromPartition`) ficam dentro dessa pasta. Resultado: nada é gravado no computador usado, e o mesmo pendrive mantém os logins ao trocar de máquina. Tem que rodar antes de qualquer leitura de `userData`, por isso fica logo no topo do arquivo, antes da instância de `Store`.
+- **Linux**: o `AppImage` (já gerado desde o início do projeto) já é inerentemente portátil — um único arquivo, `chmod +x` e roda, sem instalação.
+- **Por que não "instalar pelo navegador"**: o Deskbox embute os serviços (WhatsApp Web, Gmail, Slack...) dentro da própria janela via `BrowserView`. Isso só é possível num app desktop nativo — os próprios serviços bloqueiam ser carregados dentro de outro site/iframe (`X-Frame-Options`/CSP `frame-ancestors`), exatamente pra impedir esse tipo de embutimento (é uma proteção deles contra clickjacking/phishing). Não há como contornar isso de dentro do navegador sem um proxy reverso dedicado por serviço, fora de escopo.
+
 ## Fora do escopo (próximas versões)
 - CSS/JS customizado por serviço.
 - Proxy por serviço (hoje é só global).

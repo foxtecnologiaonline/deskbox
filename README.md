@@ -44,6 +44,10 @@ npm run dist:linux # empacota AppImage + .deb
 
 O empacotador corta os ~55 idiomas do Chromium que o app não usa (mantém só `en-US`/`pt-BR`) e minifica `main`/`preload` — ver detalhes e números em `docs/deskbox-spec.md` § "Otimização de tamanho do build".
 
+## Rodar sem instalar (Windows portable / Linux AppImage)
+
+Pra máquinas corporativas onde instalar programas é bloqueado: o build Windows gera, além do instalador, um `.exe` portátil (`win.target: ["nsis", "portable"]`) que roda direto sem instalação, sem admin, sem tocar no registro — e guarda config/sessões numa pasta ao lado do próprio `.exe` em vez de `%APPDATA%`, então um pendrive carrega tudo entre computadores. No Linux, o `AppImage` já é portátil por natureza. Detalhes em `docs/deskbox-spec.md` § "Distribuição sem instalação".
+
 ## Roadmap
 
 Ver seção "Fora do escopo" em `docs/deskbox-spec.md`: CSS/JS customizado por serviço, proxy por serviço, sincronização entre dispositivos, criptografia local, auto-update e assinatura de código.

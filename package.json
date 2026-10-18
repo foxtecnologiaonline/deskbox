@@ -47,7 +47,10 @@
       "target": ["dmg"]
     },
     "win": {
-      "target": ["nsis"]
+      "target": ["nsis", "portable"]
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
     },
     "linux": {
       "target": ["AppImage", "deb"],
