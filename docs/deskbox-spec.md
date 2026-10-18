@@ -61,6 +61,31 @@ Uma revisão de código (`/code-review`) sobre o commit dos ícones + auditoria 
 - **Senha mestre / tela de bloqueio**: hash salgado via `crypto.scryptSync` (`src/main/password.ts`, comparação com `timingSafeEqual`) — nunca guarda a senha em texto puro, e o hash (`passwordHash`) nunca sai do processo principal (o renderer só recebe `hasPassword: boolean`, ver `RendererState` em `src/shared/types.ts`). O app começa trancado em todo boot se houver senha configurada; trancar/destravar reusa o mesmo mecanismo de desanexar o `BrowserView` já usado pros modais (`ServicesManager.reattachActiveViewIfAllowed`). Botão de "Trancar agora" na sidebar (só aparece se há senha) e gestão completa (definir/trocar/remover) no modal de Configurações. **Limitação conhecida**: sem senha esquecida/recuperação — a única saída é apagar o arquivo de config (perde também os serviços), deixado assim de propósito porque é só uma tela de privacidade local, não uma defesa contra um atacante sofisticado.
 - **Proxy configurável**: global por enquanto (um único `proxyRules` pra todas as sessões — não há granularidade por serviço ainda). Aplicado via `session.setProxy()` na sessão default e em cada `BrowserView` já existente; novas sessões de serviço aplicam o proxy atual antes do primeiro `loadURL` (evita vazar a primeira requisição fora do proxy). Configurável no modal de Configurações.
 
+## Revisão de segurança (correções aplicadas)
+
+Uma revisão de código (`/code-review`, alto esforço) sobre a senha mestre e o proxy encontrou dois problemas reais antes de irem pra produção:
+
+1. **Bypass da senha mestre**: trancar o app só desanexava o `BrowserView` (escondia visualmente), mas `getEnrichedState()` continuava devolvendo a lista completa de serviços/workspaces/proxy por IPC, e nenhum handler (`addService`, `removeService`, `selectService` etc., incluindo os acionados pelos atalhos de teclado Ctrl+1-9/Tab) verificava se o app estava trancado antes de mutar o estado. Alguém com DevTools aberto (ou só usando os atalhos) podia ler e alterar tudo mesmo com a tela de bloqueio em cima. Corrigido: `getEnrichedState()` devolve uma versão sanitizada (sem nomes/URLs/proxy) enquanto trancado, e todo método que muta estado ou é sensível (`addService`, `removeService`, `reorderServices`, `selectService`, `setTheme`, `addWorkspace`, `removeWorkspace`, `selectWorkspace`, `setPassword`, `setProxy`, `getMemoryUsage`) agora recusa a operação com `this.locked` ativo — os atalhos de teclado passam pelos mesmos métodos, então ficam cobertos de graça.
+2. **Race condition no proxy**: a promise de `session.setProxy()` em `createViewForInstance` não tinha `.catch()` e podia chamar `loadURL` num `BrowserView` já destruído (ex.: serviço removido ou workspace apagado logo após ser criado, antes da promise resolver) — gerava unhandled rejection e podia tentar `loadURL` num webContents morto. Corrigido com `.catch()` (loga em vez de deixar unhandled) e `webContents.isDestroyed()` antes do `loadURL`.
+
+## Otimização de tamanho do build
+
+Pedido explícito de compactar o build mantendo qualidade. Números reais medidos num `.deb` gerado localmente:
+
+| Antes | Depois | |
+|---|---|---|
+| `out/main/index.js`: 27,6 KB | 15,2 KB | não minificado → minificado (`-45%`) |
+| `out/preload/index.js`: 2,07 KB | 1,40 KB | idem |
+| App instalado (unpacked): ~268 MB | 229 MB | locales cortados (`-39 MB`) |
+| `.deb` final: 72,4 MB | 65,8 MB | locales + `compression: maximum` |
+
+- **`electron.vite.config.ts`**: `build.minify: true` em `main` e `preload` (o `renderer` já era minificado por padrão via Vite+esbuild; `main`/`preload` não eram).
+- **`scripts/afterPack.js`** (hook do `electron-builder`): remove os `.pak` de idioma do Chromium que o app não usa, mantendo só `en-US` (fallback universal) e `pt-BR` (idioma da interface) — o Electron empacota ~55 locales por padrão (~40 MB), usados só em menus de contexto nativos (não na UI do app, que é toda React). Validado rodando o build real: "Removidos 53 locales não usados (38.8 MB)".
+- **`compression: "maximum"`** no `electron-builder` (`package.json`), em vez do padrão `"normal"` — build um pouco mais lento, instalador mais compacto.
+- Sem sourcemaps em produção (já era o padrão do `electron-vite build`, confirmado sem `*.map` em `out/`).
+
+A maior parte do tamanho final (~200 MB) é o próprio binário do Chromium/Electron — não compactável sem trocar de framework, fora do escopo de uma passada de otimização.
+
 ## Fora do escopo (próximas versões)
 - CSS/JS customizado por serviço.
 - Proxy por serviço (hoje é só global).

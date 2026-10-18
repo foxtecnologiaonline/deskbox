@@ -141,6 +141,7 @@ export class ServicesManager {
    * senha vigente).
    */
   setPassword(newPassword: string | null, currentPassword?: string): SetPasswordResult {
+    if (this.locked) return { ok: false, error: 'Destrave o app antes de alterar a senha.' }
     const currentHash = this.getState().passwordHash
     if (currentHash) {
       if (!currentPassword || !verifyPassword(currentPassword, currentHash)) {
@@ -159,6 +160,7 @@ export class ServicesManager {
    * mesmo proxy a sessões novas.
    */
   async setProxy(config: ProxyConfig | null): Promise<RendererState> {
+    if (this.locked) return this.getEnrichedState()
     this.setState((s) => ({ ...s, proxy: config }))
     const tasks = [this.applyProxyToSession(session.defaultSession)]
     for (const view of this.views.values()) {
@@ -245,6 +247,7 @@ export class ServicesManager {
    * no resultado (tratados como 0 no lado do renderer).
    */
   getMemoryUsage(): Record<string, number> {
+    if (this.locked) return {}
     const metrics = app.getAppMetrics()
     const memoryByPid = new Map(metrics.map((metric) => [metric.pid, metric.memory.workingSetSize]))
     const result: Record<string, number> = {}
@@ -261,13 +264,31 @@ export class ServicesManager {
   /**
    * Estado enviado ao renderer: campos calculados em tempo de execução (hibernated,
    * locked) e nunca inclui passwordHash — vira só o booleano hasPassword.
+   *
+   * Enquanto trancado, devolve uma versão sanitizada (sem nomes/URLs de serviços,
+   * workspaces ou proxy) — sem isso, qualquer chamada direta a
+   * `window.deskbox.getState()` pelo DevTools devolveria os dados reais mesmo com
+   * a tela de bloqueio em cima, só escondendo visualmente o BrowserView.
    */
   getEnrichedState(): RendererState {
     const { passwordHash, ...state } = this.getState()
+    const hasPassword = passwordHash !== null
+    if (this.locked) {
+      return {
+        services: [],
+        workspaces: [],
+        activeWorkspaceId: state.activeWorkspaceId,
+        activeInstanceId: null,
+        theme: state.theme,
+        proxy: null,
+        hasPassword,
+        locked: true
+      }
+    }
     return {
       ...state,
-      hasPassword: passwordHash !== null,
-      locked: this.locked,
+      hasPassword,
+      locked: false,
       services: state.services.map((service) => ({
         ...service,
         hibernated: !this.views.has(service.instanceId)
@@ -276,6 +297,7 @@ export class ServicesManager {
   }
 
   addService(payload: AddServicePayload): RendererState {
+    if (this.locked) return this.getEnrichedState()
     const catalogEntry = payload.catalogId ? findCatalogEntry(payload.catalogId) : undefined
     const name = catalogEntry?.name ?? payload.name ?? 'Site personalizado'
     const url = catalogEntry?.url ?? payload.url
@@ -308,6 +330,7 @@ export class ServicesManager {
   }
 
   removeService(instanceId: string): RendererState {
+    if (this.locked) return this.getEnrichedState()
     this.destroyView(instanceId)
     const state = this.setState((s) => {
       const removed = s.services.find((service) => service.instanceId === instanceId)
@@ -333,6 +356,7 @@ export class ServicesManager {
   }
 
   reorderServices(order: string[]): RendererState {
+    if (this.locked) return this.getEnrichedState()
     this.setState((s) => ({
       ...s,
       services: s.services.map((service) =>
@@ -351,6 +375,7 @@ export class ServicesManager {
    * filtrando pelo workspace antigo e o serviço ativo nem apareceria nela.
    */
   selectService(instanceId: string): RendererState {
+    if (this.locked) return this.getEnrichedState()
     const service = this.getState().services.find((s) => s.instanceId === instanceId)
     if (!service) return this.getEnrichedState()
     this.setState((s) => ({ ...s, activeInstanceId: instanceId, activeWorkspaceId: service.workspaceId }))
@@ -360,12 +385,14 @@ export class ServicesManager {
   }
 
   setTheme(theme: DeskboxState['theme']): RendererState {
+    if (this.locked) return this.getEnrichedState()
     this.setState((s) => ({ ...s, theme }))
     this.broadcastState()
     return this.getEnrichedState()
   }
 
   addWorkspace(name: string): RendererState {
+    if (this.locked) return this.getEnrichedState()
     const id = randomUUID()
     this.setState((s) => ({ ...s, workspaces: [...s.workspaces, { id, name: name.trim() || 'Workspace' }] }))
     this.selectWorkspace(id)
@@ -373,6 +400,7 @@ export class ServicesManager {
   }
 
   removeWorkspace(workspaceId: string): RendererState {
+    if (this.locked) return this.getEnrichedState()
     const current = this.getState()
     if (current.workspaces.length <= 1) {
       // Nunca remove o último workspace restante.
@@ -403,6 +431,7 @@ export class ServicesManager {
   }
 
   selectWorkspace(workspaceId: string): RendererState {
+    if (this.locked) return this.getEnrichedState()
     const state = this.setState((s) => {
       const firstService = this.servicesInWorkspace(workspaceId, s)[0]
       return { ...s, activeWorkspaceId: workspaceId, activeInstanceId: firstService?.instanceId ?? null }
@@ -436,8 +465,16 @@ export class ServicesManager {
       }
     })
     // Aplica o proxy global antes do primeiro carregamento, pra não vazar a
-    // primeira requisição fora do proxy configurado.
-    this.applyProxyToSession(partitionSession).finally(() => view.webContents.loadURL(instance.url))
+    // primeira requisição fora do proxy configurado. .catch() evita unhandled
+    // rejection se setProxy falhar, e isDestroyed() evita chamar loadURL num
+    // BrowserView já removido (ex.: serviço excluído enquanto a promise corria).
+    this.applyProxyToSession(partitionSession)
+      .catch((error) => console.error('[deskbox] Falha ao aplicar proxy:', error))
+      .finally(() => {
+        if (!view.webContents.isDestroyed()) {
+          view.webContents.loadURL(instance.url)
+        }
+      })
     this.registerShortcuts(view.webContents)
     this.views.set(instance.instanceId, view)
     this.webContentsIdToInstance.set(view.webContents.id, instance.instanceId)

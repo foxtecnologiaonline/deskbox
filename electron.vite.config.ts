@@ -5,6 +5,10 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    build: {
+      // electron-vite não minifica main/preload por padrão (só o renderer).
+      minify: true
+    },
     resolve: {
       alias: {
         '@shared': resolve('src/shared')
@@ -14,6 +18,7 @@ export default defineConfig({
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
+      minify: true,
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/preload/index.ts'),

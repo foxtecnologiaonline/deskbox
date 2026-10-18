@@ -40,6 +40,8 @@
       "output": "release"
     },
     "files": ["out/**/*"],
+    "compression": "maximum",
+    "afterPack": "scripts/afterPack.js",
     "mac": {
       "category": "public.app-category.productivity",
       "target": ["dmg"]

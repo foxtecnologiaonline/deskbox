@@ -40,6 +40,10 @@ npm run dist:linux # empacota AppImage + .deb
 - **Senha mestre**: tranca o app com uma tela de bloqueio (hash salgado, nunca em texto puro); botão de "trancar agora" e definir/trocar/remover senha no modal de Configurações (ícone de engrenagem na sidebar).
 - **Proxy configurável**: regras de proxy globais (`http=...;https=...`) aplicadas a todas as sessões, também pelo modal de Configurações.
 
+## Tamanho do build
+
+O empacotador corta os ~55 idiomas do Chromium que o app não usa (mantém só `en-US`/`pt-BR`) e minifica `main`/`preload` — ver detalhes e números em `docs/deskbox-spec.md` § "Otimização de tamanho do build".
+
 ## Roadmap
 
 Ver seção "Fora do escopo" em `docs/deskbox-spec.md`: CSS/JS customizado por serviço, proxy por serviço, sincronização entre dispositivos, criptografia local, auto-update e assinatura de código.
