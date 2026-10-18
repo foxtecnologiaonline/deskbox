@@ -1,0 +1,33 @@
+name: Build Windows installer
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npx electron-builder --win --publish=never
+
+      # Sem certificado de assinatura de código: o instalador funciona
+      # normalmente, mas o Windows SmartScreen mostra um aviso de "editor
+      # não reconhecido" na primeira execução (Mais informações > Executar
+      # assim mesmo). Normal para builds de teste sem assinatura.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Deskbox-Windows-installer
+          path: release/*.exe
+          retention-days: 14
