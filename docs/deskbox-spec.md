@@ -117,6 +117,14 @@ Pedido do usuário: rodar em máquinas corporativas onde instalar programas é b
 - Auto-update.
 - Assinatura de código para distribuição (macOS/Windows).
 
+## Revisão pós-fase-4 (correções aplicadas)
+
+Mais uma passada de `/code-review` (alto esforço, escopo `src/`) sobre tudo construído até aqui encontrou 3 problemas reais:
+
+1. **`exportConfig` não verificava o lock**: diferente de todo outro método sensível (ver "Revisão de segurança" acima), `exportConfig()`/seu handler de IPC não checava `this.locked` — dava pra chamar `window.deskbox.exportConfig()` pelo DevTools e salvar a lista completa de serviços/workspaces/proxy em disco mesmo com a tela de bloqueio em cima. Corrigido: o handler `IPC.EXPORT_CONFIG` em `index.ts` agora recusa com `Destrave o app antes de exportar.` antes de abrir o diálogo de salvar, igual aos outros métodos sensíveis.
+2. **Hash de senha síncrono travava o main process**: `password.ts` usava `scryptSync`, que bloqueia a única thread do processo main por ~100ms+ a cada tentativa de destravar ou trocar senha — nesse intervalo a janela não resiza, nenhum IPC responde, e `before-input-event` (atalhos de teclado) para de funcionar em todos os serviços abertos. Corrigido: `password.ts` reescrito com `scrypt` assíncrono (via `util.promisify`), e `unlock()`/`setPassword()` em `services-manager.ts` agora são `async` e aguardam o hash/verificação sem travar o loop de eventos.
+3. **Reordenar serviços por arrastar tinha inconsistência de direção**: `handleDrop` em `Sidebar.tsx` calculava a posição de destino (`to`) antes de remover o item arrastado do array, então o item caía *depois* do alvo ao arrastar pra frente mas *antes* do alvo ao arrastar pra trás — comportamento inconsistente dependendo da direção do gesto. Corrigido: o índice de destino agora é recalculado depois de remover o item arrastado, então ele sempre cai imediatamente antes do alvo, nas duas direções.
+
 ## v2 — Controle de celular (Android) dentro do Deskbox
 
 Ideia: embutir uma tela do celular como se fosse mais um "serviço" do Deskbox, com controle de toque/teclado real, não só espelhamento passivo.

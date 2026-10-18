@@ -57,8 +57,8 @@ export default function Sidebar({
     if (!draggingId || draggingId === targetId) return
     const order = sorted.map((s) => s.instanceId)
     const from = order.indexOf(draggingId)
-    const to = order.indexOf(targetId)
     order.splice(from, 1)
+    const to = order.indexOf(targetId)
     order.splice(to, 0, draggingId)
     onReorder(order)
     setDraggingId(null)

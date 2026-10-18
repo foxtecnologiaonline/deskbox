@@ -110,6 +110,9 @@ function registerIpcHandlers(): void {
     manager!.moveServiceToWorkspace(instanceId, workspaceId)
   )
   ipcMain.handle(IPC.EXPORT_CONFIG, async () => {
+    if (manager!.getEnrichedState().locked) {
+      return { ok: false, error: 'Destrave o app antes de exportar.' }
+    }
     const result = await dialog.showSaveDialog(mainWindow!, {
       title: 'Exportar configuração do Deskbox',
       defaultPath: 'deskbox-config.json',

@@ -118,9 +118,9 @@ export class ServicesManager {
   }
 
   /** Confere a senha e destrava o app se correta. Sem senha configurada, sempre destrava. */
-  unlock(password: string): boolean {
+  async unlock(password: string): Promise<boolean> {
     const hash = this.getState().passwordHash
-    if (!hash || verifyPassword(password, hash)) {
+    if (!hash || (await verifyPassword(password, hash))) {
       this.locked = false
       this.reattachActiveViewIfAllowed()
       this.broadcastState()
@@ -143,15 +143,15 @@ export class ServicesManager {
    * destrave/altere a proteção sem confirmar que quem está pedindo já sabe a
    * senha vigente).
    */
-  setPassword(newPassword: string | null, currentPassword?: string): SetPasswordResult {
+  async setPassword(newPassword: string | null, currentPassword?: string): Promise<SetPasswordResult> {
     if (this.locked) return { ok: false, error: 'Destrave o app antes de alterar a senha.' }
     const currentHash = this.getState().passwordHash
     if (currentHash) {
-      if (!currentPassword || !verifyPassword(currentPassword, currentHash)) {
+      if (!currentPassword || !(await verifyPassword(currentPassword, currentHash))) {
         return { ok: false, error: 'Senha atual incorreta.' }
       }
     }
-    const nextHash = newPassword ? hashPassword(newPassword) : null
+    const nextHash = newPassword ? await hashPassword(newPassword) : null
     this.setState((s) => ({ ...s, passwordHash: nextHash }))
     this.broadcastState()
     return { ok: true }

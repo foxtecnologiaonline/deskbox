@@ -1,20 +1,22 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
+import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'crypto'
+import { promisify } from 'util'
 
+const scrypt = promisify(scryptCallback)
 const KEY_LENGTH = 64
 
 /** Retorna "<saltHex>:<hashHex>", pronto pra persistir. */
-export function hashPassword(password: string): string {
+export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16)
-  const hash = scryptSync(password, salt, KEY_LENGTH)
+  const hash = (await scrypt(password, salt, KEY_LENGTH)) as Buffer
   return `${salt.toString('hex')}:${hash.toString('hex')}`
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [saltHex, hashHex] = stored.split(':')
   if (!saltHex || !hashHex) return false
   const salt = Buffer.from(saltHex, 'hex')
   const expected = Buffer.from(hashHex, 'hex')
-  const actual = scryptSync(password, salt, KEY_LENGTH)
+  const actual = (await scrypt(password, salt, KEY_LENGTH)) as Buffer
   if (actual.length !== expected.length) return false
   return timingSafeEqual(actual, expected)
 }
