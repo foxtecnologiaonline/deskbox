@@ -39,6 +39,10 @@ npm run dist:linux # empacota AppImage + .deb
 - Empacotamento via `electron-builder` (AppImage/deb no Linux, dmg no macOS, nsis no Windows), com ícone customizado próprio (`build/icon.{png,ico,icns}`).
 - **Senha mestre**: tranca o app com uma tela de bloqueio (hash salgado, nunca em texto puro); botão de "trancar agora" e definir/trocar/remover senha no modal de Configurações (ícone de engrenagem na sidebar).
 - **Proxy configurável**: regras de proxy globais (`http=...;https=...`) aplicadas a todas as sessões, também pelo modal de Configurações.
+- **Hibernação configurável** (5/10/30 min ou nunca) e **exportar/importar configuração** (serviços, workspaces, tema, proxy — sem senha nem logins), ambos no modal de Configurações.
+- Arraste um serviço até um workspace na sidebar pra **movê-lo** de workspace. Ícone mostra um spinner enquanto a página carrega (ex.: saindo de hibernação).
+- Empty state com chips de adição rápida dos apps mais populares, e um cartão de boas-vindas dispensável no primeiro uso.
+- Toasts discretos de confirmação pra ações como salvar senha/proxy/hibernação.
 
 ## Tamanho do build
 

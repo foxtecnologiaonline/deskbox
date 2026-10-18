@@ -95,6 +95,20 @@ Pedido do usuário: rodar em máquinas corporativas onde instalar programas é b
 - **Linux**: o `AppImage` (já gerado desde o início do projeto) já é inerentemente portátil — um único arquivo, `chmod +x` e roda, sem instalação.
 - **Por que não "instalar pelo navegador"**: o Deskbox embute os serviços (WhatsApp Web, Gmail, Slack...) dentro da própria janela via `BrowserView`. Isso só é possível num app desktop nativo — os próprios serviços bloqueiam ser carregados dentro de outro site/iframe (`X-Frame-Options`/CSP `frame-ancestors`), exatamente pra impedir esse tipo de embutimento (é uma proteção deles contra clickjacking/phishing). Não há como contornar isso de dentro do navegador sem um proxy reverso dedicado por serviço, fora de escopo.
 
+## Leva de melhorias (visual/performance/UI/UX)
+
+9 das 10 sugestões dadas ao usuário foram implementadas nessa leva (a 10ª, ícone de marca real, segue pendente — precisa de ativos visuais próprios, não dá pra inventar uma "marca real"):
+
+- **Lazy-load de favicons**: `loading="lazy"` em toda `<img>` de favicon (Sidebar, catálogo, command palette, empty state).
+- **Polling de memória pausado quando oculto**: `App.tsx` escuta `document.visibilitychange` e para o `setInterval` de `getMemoryUsage()` enquanto a janela está minimizada/oculta.
+- **Sistema de toast**: `src/renderer/src/toast.ts` (pub/sub mínimo) + `<ToastHost/>` montado uma vez em `App.tsx`; qualquer componente chama `showToast(msg)` sem precisar de prop drilling. Substituiu as mensagens de sucesso inline do modal de Configurações (erros continuam inline, perto do campo).
+- **Hibernação configurável**: `DeskboxState.hibernateAfterMinutes` (5/10/30/nunca), editável no modal de Configurações; `sweepHibernation()` lê o valor em vez de um `HIBERNATE_AFTER_MS` fixo.
+- **Exportar/importar configuração**: `dialog.showSaveDialog`/`showOpenDialog` no main process + `ServicesManager.exportConfig()`/`importConfig()`. Exporta serviços/workspaces/tema/proxy/hibernação — nunca a senha, nunca os logins de cada serviço (ficam nas partições de sessão, fora do JSON). Import valida forma (instanceId/url/partition como string, workspaceId existente) e aplica tudo dentro de um try/catch, pra um JSON malformado virar erro tratado em vez de deixar o processo principal instável.
+- **Mover serviço entre workspaces por arrastar**: `WorkspaceSwitcher` aceita `onDrop` nos pills; `ServicesManager.moveServiceToWorkspace()` atualiza `workspaceId`/`order` e, se o serviço movido era o ativo, escolhe um irmão do workspace atual como novo ativo (não "segue" o serviço pro destino).
+- **Spinner de carregamento no ícone**: hooks `did-start-loading`/`did-stop-loading` em cada `BrowserView` alimentam um `Set<instanceId>` (`loadingInstanceIds`), exposto como `ServiceInstance.loading` no estado enviado ao renderer.
+- **Empty state mais rico**: chips de adição rápida (WhatsApp, Gmail, Slack, Telegram, Discord, Notion) direto no estado vazio, além do botão pro catálogo completo.
+- **Onboarding guiado**: cartão dispensável no primeiro uso (`DeskboxState.onboardingDismissed`), com as 3 dicas principais (adicionar serviço, workspaces, `Ctrl+K`).
+
 ## Fora do escopo (próximas versões)
 - CSS/JS customizado por serviço.
 - Proxy por serviço (hoje é só global).

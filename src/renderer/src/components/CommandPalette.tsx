@@ -113,7 +113,7 @@ export default function CommandPalette({
               onMouseEnter={() => setActiveIndex(index)}
               onClick={() => run(item)}
             >
-              {item.icon && <img src={item.icon} alt="" />}
+              {item.icon && <img src={item.icon} alt="" loading="lazy" />}
               <span className="palette-item-label">{item.label}</span>
               {item.sublabel && <span className="palette-item-sublabel">{item.sublabel}</span>}
             </button>

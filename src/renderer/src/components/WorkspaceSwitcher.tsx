@@ -3,9 +3,11 @@ import type { Workspace } from '@shared/types'
 interface WorkspaceSwitcherProps {
   workspaces: Workspace[]
   activeWorkspaceId: string
+  draggingServiceId: string | null
   onSelect: (workspaceId: string) => void
   onAddClick: () => void
   onRemove: (workspaceId: string) => void
+  onDropService: (instanceId: string, workspaceId: string) => void
 }
 
 function initials(name: string): string {
@@ -15,17 +17,27 @@ function initials(name: string): string {
 export default function WorkspaceSwitcher({
   workspaces,
   activeWorkspaceId,
+  draggingServiceId,
   onSelect,
   onAddClick,
-  onRemove
+  onRemove,
+  onDropService
 }: WorkspaceSwitcherProps): JSX.Element {
   return (
     <div className="workspace-switcher">
       {workspaces.map((workspace) => (
         <div
           key={workspace.id}
-          className={`workspace-pill-wrap ${workspace.id === activeWorkspaceId ? 'active' : ''}`}
-          title={workspace.name}
+          className={`workspace-pill-wrap ${workspace.id === activeWorkspaceId ? 'active' : ''} ${
+            draggingServiceId && workspace.id !== activeWorkspaceId ? 'drop-target' : ''
+          }`}
+          title={draggingServiceId ? `Mover para "${workspace.name}"` : workspace.name}
+          onDragOver={(e) => {
+            if (draggingServiceId) e.preventDefault()
+          }}
+          onDrop={() => {
+            if (draggingServiceId) onDropService(draggingServiceId, workspace.id)
+          }}
         >
           <button className="workspace-pill" onClick={() => onSelect(workspace.id)}>
             {initials(workspace.name)}

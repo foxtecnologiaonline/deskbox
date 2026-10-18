@@ -4,6 +4,8 @@ import { join } from 'path'
 import type {
   AddServicePayload,
   DeskboxState,
+  ExportedConfig,
+  ImportConfigResult,
   ProxyConfig,
   RendererState,
   ServiceInstance,
@@ -14,7 +16,6 @@ import { CATALOG, findCatalogEntry } from './catalog'
 import { hashPassword, verifyPassword } from './password'
 
 const SIDEBAR_WIDTH = 72
-const HIBERNATE_AFTER_MS = 10 * 60 * 1000
 const HIBERNATION_SWEEP_INTERVAL_MS = 60 * 1000
 
 function domainFromUrl(url: string): string {
@@ -33,6 +34,8 @@ export class ServicesManager {
   private webContentsIdToInstance = new Map<number, string>()
   private lastActiveAt = new Map<string, number>()
   private currentlyShownInstanceId: string | null = null
+  /** instanceIds cujo BrowserView está no meio de um carregamento (did-start-loading..did-stop-loading). */
+  private loadingInstanceIds = new Set<string>()
   /** true enquanto um modal do renderer (overlay React) precisa ficar visível. */
   private overlayOpen = false
   /** true quando o app está trancado por senha mestre — nenhum BrowserView é exibido. */
@@ -177,6 +180,119 @@ export class ServicesManager {
     await target.setProxy({ proxyRules })
   }
 
+  /** `minutes: null` desativa a hibernação automática (serviços nunca descarregam sozinhos). */
+  setHibernateAfterMinutes(minutes: number | null): RendererState {
+    if (this.locked) return this.getEnrichedState()
+    this.setState((s) => ({ ...s, hibernateAfterMinutes: minutes }))
+    this.broadcastState()
+    return this.getEnrichedState()
+  }
+
+  dismissOnboarding(): RendererState {
+    if (this.locked) return this.getEnrichedState()
+    this.setState((s) => ({ ...s, onboardingDismissed: true }))
+    this.broadcastState()
+    return this.getEnrichedState()
+  }
+
+  /**
+   * Move um serviço pra outro workspace (drag-and-drop no switcher). Se o serviço
+   * movido era o ativo, o workspace atual continua em foco e um irmão que ficou
+   * nele vira o novo ativo (não "segue" o serviço pro workspace de destino).
+   */
+  moveServiceToWorkspace(instanceId: string, targetWorkspaceId: string): RendererState {
+    if (this.locked) return this.getEnrichedState()
+    const state = this.setState((s) => {
+      const service = s.services.find((svc) => svc.instanceId === instanceId)
+      if (!service || service.workspaceId === targetWorkspaceId) return s
+      const targetCount = s.services.filter((svc) => svc.workspaceId === targetWorkspaceId).length
+      const services = s.services.map((svc) =>
+        svc.instanceId === instanceId ? { ...svc, workspaceId: targetWorkspaceId, order: targetCount } : svc
+      )
+      let activeInstanceId = s.activeInstanceId
+      if (s.activeInstanceId === instanceId) {
+        const sibling = services
+          .filter((svc) => svc.workspaceId === s.activeWorkspaceId)
+          .sort((a, b) => a.order - b.order)[0]
+        activeInstanceId = sibling?.instanceId ?? null
+      }
+      return { ...s, services, activeInstanceId }
+    })
+    if (state.activeInstanceId && state.activeInstanceId !== instanceId) {
+      this.showInstance(state.activeInstanceId)
+    } else if (!state.activeInstanceId) {
+      this.hideActiveView()
+    }
+    this.broadcastState()
+    return this.getEnrichedState()
+  }
+
+  /** Backup/transferência de configuração. Nunca inclui a senha; sessões (login de cada
+   * serviço) também ficam de fora — só a "planta" de serviços/workspaces é exportada. */
+  exportConfig(): ExportedConfig {
+    const { passwordHash: _passwordHash, ...rest } = this.getState()
+    return rest
+  }
+
+  importConfig(config: ExportedConfig): ImportConfigResult {
+    if (this.locked) return { ok: false, error: 'Destrave o app antes de importar.' }
+    if (!config || !Array.isArray(config.services) || !Array.isArray(config.workspaces)) {
+      return { ok: false, error: 'Arquivo inválido.' }
+    }
+    if (config.workspaces.length === 0) {
+      return { ok: false, error: 'Configuração sem nenhum workspace.' }
+    }
+    const workspaceIds = new Set(config.workspaces.map((w) => w.id))
+    const servicesValid = config.services.every(
+      (s) =>
+        typeof s.instanceId === 'string' &&
+        typeof s.url === 'string' &&
+        typeof s.partition === 'string' &&
+        workspaceIds.has(s.workspaceId)
+    )
+    if (!servicesValid) {
+      return { ok: false, error: 'Arquivo com serviços inválidos ou de um workspace inexistente.' }
+    }
+    // Um JSON editado à mão pode ter um activeWorkspaceId que não existe mais
+    // entre os workspaces importados — cai pro primeiro nesse caso, em vez de
+    // deixar o app numa visão sem workspace válido.
+    const activeWorkspaceId = workspaceIds.has(config.activeWorkspaceId)
+      ? config.activeWorkspaceId
+      : config.workspaces[0].id
+
+    try {
+      for (const instanceId of [...this.views.keys()]) {
+        this.destroyView(instanceId)
+      }
+      this.setState((s) => ({
+        ...s,
+        services: config.services,
+        workspaces: config.workspaces,
+        activeWorkspaceId,
+        activeInstanceId: null,
+        theme: config.theme,
+        proxy: config.proxy,
+        hibernateAfterMinutes: config.hibernateAfterMinutes,
+        onboardingDismissed: config.onboardingDismissed
+      }))
+      const firstInWorkspace = this.servicesInWorkspace(this.getState().activeWorkspaceId)[0]
+      if (firstInWorkspace) {
+        this.setState((s) => ({ ...s, activeInstanceId: firstInWorkspace.instanceId }))
+        this.showInstance(firstInWorkspace.instanceId)
+      } else {
+        this.hideActiveView()
+      }
+      this.applyProxyToSession(session.defaultSession).catch((error) => {
+        console.error('[deskbox] Falha ao aplicar proxy importado:', error)
+      })
+      this.broadcastState()
+      return { ok: true }
+    } catch (error) {
+      console.error('[deskbox] Falha ao importar configuração:', error)
+      return { ok: false, error: 'Falha ao aplicar a configuração importada.' }
+    }
+  }
+
   private attachWindowListeners(): void {
     this.window.on('resize', () => this.layout())
     this.registerShortcuts(this.window.webContents)
@@ -281,6 +397,8 @@ export class ServicesManager {
         activeInstanceId: null,
         theme: state.theme,
         proxy: null,
+        hibernateAfterMinutes: state.hibernateAfterMinutes,
+        onboardingDismissed: state.onboardingDismissed,
         hasPassword,
         locked: true
       }
@@ -291,7 +409,8 @@ export class ServicesManager {
       locked: false,
       services: state.services.map((service) => ({
         ...service,
-        hibernated: !this.views.has(service.instanceId)
+        hibernated: !this.views.has(service.instanceId),
+        loading: this.loadingInstanceIds.has(service.instanceId)
       }))
     }
   }
@@ -317,7 +436,8 @@ export class ServicesManager {
       order: this.servicesInWorkspace(workspaceId).length,
       muted: false,
       unreadCount: 0,
-      hibernated: false
+      hibernated: false,
+      loading: true
     }
     this.setState((s) => ({
       ...s,
@@ -476,6 +596,14 @@ export class ServicesManager {
         }
       })
     this.registerShortcuts(view.webContents)
+    view.webContents.on('did-start-loading', () => {
+      this.loadingInstanceIds.add(instance.instanceId)
+      this.broadcastState()
+    })
+    view.webContents.on('did-stop-loading', () => {
+      this.loadingInstanceIds.delete(instance.instanceId)
+      this.broadcastState()
+    })
     this.views.set(instance.instanceId, view)
     this.webContentsIdToInstance.set(view.webContents.id, instance.instanceId)
   }
@@ -525,15 +653,19 @@ export class ServicesManager {
     this.webContentsIdToInstance.delete(view.webContents.id)
     this.views.delete(instanceId)
     this.lastActiveAt.delete(instanceId)
+    this.loadingInstanceIds.delete(instanceId)
   }
 
   private sweepHibernation(): void {
+    const hibernateAfterMinutes = this.getState().hibernateAfterMinutes
+    if (hibernateAfterMinutes === null) return
+    const hibernateAfterMs = hibernateAfterMinutes * 60 * 1000
     const now = Date.now()
     let changed = false
     for (const instanceId of [...this.views.keys()]) {
       if (instanceId === this.currentlyShownInstanceId) continue
       const lastActive = this.lastActiveAt.get(instanceId) ?? now
-      if (now - lastActive >= HIBERNATE_AFTER_MS) {
+      if (now - lastActive >= hibernateAfterMs) {
         this.destroyView(instanceId)
         changed = true
       }

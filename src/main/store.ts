@@ -12,7 +12,9 @@ const DEFAULT_STATE: DeskboxState = {
   activeInstanceId: null,
   theme: 'system',
   passwordHash: null,
-  proxy: null
+  proxy: null,
+  hibernateAfterMinutes: 10,
+  onboardingDismissed: false
 }
 
 export class Store {

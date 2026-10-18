@@ -26,6 +26,8 @@ export interface ServiceInstance {
   unreadCount: number
   /** Calculado em tempo de execução: true quando o BrowserView foi descarregado da memória. */
   hibernated: boolean
+  /** Calculado em tempo de execução: true enquanto a página está carregando (ex.: saindo de hibernação). */
+  loading: boolean
 }
 
 /** Estado persistido (Store). `passwordHash` nunca deve ser enviado ao renderer — ver RendererState. */
@@ -37,6 +39,10 @@ export interface DeskboxState {
   theme: Theme
   passwordHash: string | null
   proxy: ProxyConfig | null
+  /** Minutos de inatividade até hibernar um serviço; null desativa a hibernação. */
+  hibernateAfterMinutes: number | null
+  /** true depois que o usuário fecha o tour de boas-vindas. */
+  onboardingDismissed: boolean
 }
 
 export interface ProxyConfig {
@@ -65,6 +71,14 @@ export interface SetPasswordPayload {
 }
 
 export interface SetPasswordResult {
+  ok: boolean
+  error?: string
+}
+
+/** Configuração exportável (backup/transferência) — nunca inclui passwordHash. */
+export type ExportedConfig = Omit<DeskboxState, 'passwordHash'>
+
+export interface ImportConfigResult {
   ok: boolean
   error?: string
 }

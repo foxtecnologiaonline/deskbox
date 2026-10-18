@@ -17,6 +17,7 @@ interface SidebarProps {
   onSelect: (instanceId: string) => void
   onRemove: (instanceId: string) => void
   onReorder: (order: string[]) => void
+  onMoveToWorkspace: (instanceId: string, workspaceId: string) => void
   onAddClick: () => void
   onThemeToggle: () => void
   onOpenPalette: () => void
@@ -38,6 +39,7 @@ export default function Sidebar({
   onSelect,
   onRemove,
   onReorder,
+  onMoveToWorkspace,
   onAddClick,
   onThemeToggle,
   onOpenPalette,
@@ -67,9 +69,14 @@ export default function Sidebar({
       <WorkspaceSwitcher
         workspaces={workspaces}
         activeWorkspaceId={activeWorkspaceId}
+        draggingServiceId={draggingId}
         onSelect={onSelectWorkspace}
         onAddClick={onAddWorkspaceClick}
         onRemove={onRemoveWorkspace}
+        onDropService={(instanceId, workspaceId) => {
+          onMoveToWorkspace(instanceId, workspaceId)
+          setDraggingId(null)
+        }}
       />
       <div className="sidebar-divider" />
       <div className="sidebar-services">
@@ -79,6 +86,7 @@ export default function Sidebar({
             className={`service-icon-wrap ${service.instanceId === activeInstanceId ? 'active' : ''} ${service.hibernated ? 'hibernated' : ''}`}
             draggable
             onDragStart={() => setDraggingId(service.instanceId)}
+            onDragEnd={() => setDraggingId(null)}
             onDragOver={(e) => e.preventDefault()}
             onDrop={() => handleDrop(service.instanceId)}
             title={
@@ -90,7 +98,8 @@ export default function Sidebar({
             }
           >
             <button className="service-icon" onClick={() => onSelect(service.instanceId)}>
-              <img src={faviconUrl(service.domain)} alt={service.name} />
+              <img src={faviconUrl(service.domain)} alt={service.name} loading="lazy" />
+              {service.loading && !service.hibernated && <span className="service-spinner" />}
               {service.unreadCount > 0 && (
                 <span className="unread-badge">{service.unreadCount > 99 ? '99+' : service.unreadCount}</span>
               )}

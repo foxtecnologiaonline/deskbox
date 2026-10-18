@@ -17,5 +17,10 @@ export const IPC = {
   UNLOCK: 'deskbox:unlock',
   LOCK_NOW: 'deskbox:lock-now',
   SET_PASSWORD: 'deskbox:set-password',
-  SET_PROXY: 'deskbox:set-proxy'
+  SET_PROXY: 'deskbox:set-proxy',
+  SET_HIBERNATE_MINUTES: 'deskbox:set-hibernate-minutes',
+  EXPORT_CONFIG: 'deskbox:export-config',
+  IMPORT_CONFIG: 'deskbox:import-config',
+  MOVE_SERVICE_TO_WORKSPACE: 'deskbox:move-service-to-workspace',
+  DISMISS_ONBOARDING: 'deskbox:dismiss-onboarding'
 } as const

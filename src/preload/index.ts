@@ -1,6 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc'
-import type { AddServicePayload, ProxyConfig, RendererState, SetPasswordResult, Theme } from '@shared/types'
+import type {
+  AddServicePayload,
+  ImportConfigResult,
+  ProxyConfig,
+  RendererState,
+  SetPasswordResult,
+  Theme
+} from '@shared/types'
 
 const api = {
   getState: (): Promise<RendererState> => ipcRenderer.invoke(IPC.GET_STATE),
@@ -22,6 +29,13 @@ const api = {
   setPassword: (newPassword: string | null, currentPassword?: string): Promise<SetPasswordResult> =>
     ipcRenderer.invoke(IPC.SET_PASSWORD, { newPassword, currentPassword }),
   setProxy: (config: ProxyConfig | null): Promise<RendererState> => ipcRenderer.invoke(IPC.SET_PROXY, config),
+  setHibernateAfterMinutes: (minutes: number | null): Promise<RendererState> =>
+    ipcRenderer.invoke(IPC.SET_HIBERNATE_MINUTES, minutes),
+  dismissOnboarding: (): Promise<RendererState> => ipcRenderer.invoke(IPC.DISMISS_ONBOARDING),
+  moveServiceToWorkspace: (instanceId: string, workspaceId: string): Promise<RendererState> =>
+    ipcRenderer.invoke(IPC.MOVE_SERVICE_TO_WORKSPACE, instanceId, workspaceId),
+  exportConfig: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IPC.EXPORT_CONFIG),
+  importConfig: (): Promise<ImportConfigResult> => ipcRenderer.invoke(IPC.IMPORT_CONFIG),
   onStateChanged: (callback: (state: RendererState) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: RendererState): void => callback(state)
     ipcRenderer.on(IPC.STATE_CHANGED, listener)

@@ -1,34 +1,48 @@
 import { useState } from 'react'
 import type { ProxyConfig } from '@shared/types'
+import { showToast } from '../toast'
 
 interface SettingsModalProps {
   hasPassword: boolean
   proxy: ProxyConfig | null
+  hibernateAfterMinutes: number | null
   onClose: () => void
 }
 
-export default function SettingsModal({ hasPassword, proxy, onClose }: SettingsModalProps): JSX.Element {
+const HIBERNATE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '5', label: '5 minutos' },
+  { value: '10', label: '10 minutos' },
+  { value: '30', label: '30 minutos' },
+  { value: 'never', label: 'Nunca hibernar' }
+]
+
+export default function SettingsModal({
+  hasPassword,
+  proxy,
+  hibernateAfterMinutes,
+  onClose
+}: SettingsModalProps): JSX.Element {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [passwordMessage, setPasswordMessage] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
 
   const [proxyRules, setProxyRules] = useState(proxy?.rules ?? '')
-  const [proxyMessage, setProxyMessage] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
   async function handleSetPassword(e: React.FormEvent): Promise<void> {
     e.preventDefault()
-    setPasswordMessage(null)
+    setPasswordError(null)
     if (newPassword && newPassword !== confirmPassword) {
-      setPasswordMessage({ type: 'error', text: 'As senhas não coincidem.' })
+      setPasswordError('As senhas não coincidem.')
       return
     }
     const result = await window.deskbox.setPassword(newPassword || null, currentPassword || undefined)
     if (!result.ok) {
-      setPasswordMessage({ type: 'error', text: result.error ?? 'Não foi possível salvar.' })
+      setPasswordError(result.error ?? 'Não foi possível salvar.')
       return
     }
-    setPasswordMessage({ type: 'ok', text: newPassword ? 'Senha salva.' : 'Senha removida.' })
+    showToast(newPassword ? 'Senha salva.' : 'Senha removida.')
     setCurrentPassword('')
     setNewPassword('')
     setConfirmPassword('')
@@ -38,7 +52,36 @@ export default function SettingsModal({ hasPassword, proxy, onClose }: SettingsM
     e.preventDefault()
     const trimmed = proxyRules.trim()
     await window.deskbox.setProxy(trimmed ? { rules: trimmed } : null)
-    setProxyMessage(trimmed ? 'Proxy aplicado.' : 'Proxy removido.')
+    showToast(trimmed ? 'Proxy aplicado.' : 'Proxy removido.')
+  }
+
+  async function handleHibernateChange(e: React.ChangeEvent<HTMLSelectElement>): Promise<void> {
+    const minutes = e.target.value === 'never' ? null : Number(e.target.value)
+    await window.deskbox.setHibernateAfterMinutes(minutes)
+    showToast('Hibernação atualizada.')
+  }
+
+  async function handleExport(): Promise<void> {
+    setBusy(true)
+    const result = await window.deskbox.exportConfig()
+    setBusy(false)
+    if (result.ok) showToast('Configuração exportada.')
+    else if (result.error && result.error !== 'Cancelado.') showToast(`Falha ao exportar: ${result.error}`)
+  }
+
+  async function handleImport(): Promise<void> {
+    if (
+      !window.confirm(
+        'Importar substitui todos os serviços, workspaces, tema e proxy atuais pelos do arquivo. Os logins de cada serviço não vêm junto — você precisará entrar de novo. Continuar?'
+      )
+    ) {
+      return
+    }
+    setBusy(true)
+    const result = await window.deskbox.importConfig()
+    setBusy(false)
+    if (result.ok) showToast('Configuração importada.')
+    else if (result.error && result.error !== 'Cancelado.') showToast(`Falha ao importar: ${result.error}`)
   }
 
   return (
@@ -79,11 +122,7 @@ export default function SettingsModal({ hasPassword, proxy, onClose }: SettingsM
                 />
               </label>
             )}
-            {passwordMessage && (
-              <p className={passwordMessage.type === 'error' ? 'settings-error' : 'settings-ok'}>
-                {passwordMessage.text}
-              </p>
-            )}
+            {passwordError && <p className="settings-error">{passwordError}</p>}
             <div className="custom-form-actions">
               {hasPassword ? (
                 <button type="button" className="link-button" onClick={() => window.deskbox.lockNow()}>
@@ -110,7 +149,6 @@ export default function SettingsModal({ hasPassword, proxy, onClose }: SettingsM
                 placeholder="http=proxy.empresa.com:8080;https=proxy.empresa.com:8080"
               />
             </label>
-            {proxyMessage && <p className="settings-ok">{proxyMessage}</p>}
             <div className="custom-form-actions">
               <span />
               <button type="submit" className="primary-button">
@@ -118,6 +156,36 @@ export default function SettingsModal({ hasPassword, proxy, onClose }: SettingsM
               </button>
             </div>
           </form>
+        </section>
+
+        <section className="settings-section">
+          <h3>Hibernação automática</h3>
+          <label className="settings-select-label">
+            Descarregar serviços inativos da memória após
+            <select value={hibernateAfterMinutes ?? 'never'} onChange={handleHibernateChange}>
+              {HIBERNATE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
+
+        <section className="settings-section">
+          <h3>Backup</h3>
+          <p className="settings-hint">
+            Exporta/importa a lista de serviços, workspaces, tema e proxy. Não inclui a senha mestre nem os logins de
+            cada serviço (isso fica salvo separadamente, fora deste arquivo).
+          </p>
+          <div className="custom-form-actions">
+            <button type="button" className="link-button" onClick={handleImport} disabled={busy}>
+              Importar configuração…
+            </button>
+            <button type="button" className="primary-button" onClick={handleExport} disabled={busy}>
+              Exportar configuração
+            </button>
+          </div>
         </section>
       </div>
     </div>

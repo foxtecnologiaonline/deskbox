@@ -1,8 +1,8 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { IPC } from '@shared/ipc'
-import type { AddServicePayload, ProxyConfig, SetPasswordPayload } from '@shared/types'
+import type { AddServicePayload, ExportedConfig, ImportConfigResult, ProxyConfig, SetPasswordPayload } from '@shared/types'
 import { Store } from './store'
 import { ServicesManager } from './services-manager'
 
@@ -102,6 +102,43 @@ function registerIpcHandlers(): void {
     manager!.setPassword(payload.newPassword, payload.currentPassword)
   )
   ipcMain.handle(IPC.SET_PROXY, (_event, config: ProxyConfig | null) => manager!.setProxy(config))
+  ipcMain.handle(IPC.SET_HIBERNATE_MINUTES, (_event, minutes: number | null) =>
+    manager!.setHibernateAfterMinutes(minutes)
+  )
+  ipcMain.handle(IPC.DISMISS_ONBOARDING, () => manager!.dismissOnboarding())
+  ipcMain.handle(IPC.MOVE_SERVICE_TO_WORKSPACE, (_event, instanceId: string, workspaceId: string) =>
+    manager!.moveServiceToWorkspace(instanceId, workspaceId)
+  )
+  ipcMain.handle(IPC.EXPORT_CONFIG, async () => {
+    const result = await dialog.showSaveDialog(mainWindow!, {
+      title: 'Exportar configuração do Deskbox',
+      defaultPath: 'deskbox-config.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+    if (result.canceled || !result.filePath) return { ok: false, error: 'Cancelado.' }
+    try {
+      const data: ExportedConfig = manager!.exportConfig()
+      writeFileSync(result.filePath, JSON.stringify(data, null, 2), 'utf-8')
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Falha ao salvar o arquivo.' }
+    }
+  })
+  ipcMain.handle(IPC.IMPORT_CONFIG, async (): Promise<ImportConfigResult> => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Importar configuração do Deskbox',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile']
+    })
+    if (result.canceled || result.filePaths.length === 0) return { ok: false, error: 'Cancelado.' }
+    try {
+      const raw = readFileSync(result.filePaths[0], 'utf-8')
+      const parsed = JSON.parse(raw) as ExportedConfig
+      return manager!.importConfig(parsed)
+    } catch {
+      return { ok: false, error: 'Arquivo inválido ou corrompido.' }
+    }
+  })
 }
 
 app.whenReady().then(() => {

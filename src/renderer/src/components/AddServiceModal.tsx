@@ -58,7 +58,7 @@ export default function AddServiceModal({
             <div className="catalog-grid">
               {filtered.map((entry) => (
                 <button key={entry.id} className="catalog-item" onClick={() => onAddFromCatalog(entry.id)}>
-                  <img src={faviconUrl(entry.domain)} alt={entry.name} />
+                  <img src={faviconUrl(entry.domain)} alt={entry.name} loading="lazy" />
                   <span>{entry.name}</span>
                 </button>
               ))}

@@ -7,6 +7,8 @@ import CommandPalette from './components/CommandPalette'
 import SettingsModal from './components/SettingsModal'
 import LockScreen from './components/LockScreen'
 import EmptyState from './components/EmptyState'
+import Onboarding from './components/Onboarding'
+import ToastHost from './components/ToastHost'
 
 export default function App(): JSX.Element {
   const [state, setState] = useState<RendererState | null>(null)
@@ -25,19 +27,39 @@ export default function App(): JSX.Element {
   }, [])
 
   // Só pra mostrar o ganho real da hibernação na sidebar; não precisa ser em
-  // tempo real, então um polling simples a cada 5s é suficiente.
+  // tempo real, então um polling simples é suficiente — e pausa quando a janela
+  // está oculta/minimizada (document.hidden), já que ninguém está olhando o
+  // número e não vale gastar IPC + app.getAppMetrics() à toa em segundo plano.
   useEffect(() => {
     let cancelled = false
+    let interval: ReturnType<typeof setInterval> | null = null
+
     const poll = (): void => {
       window.deskbox.getMemoryUsage().then((usage) => {
         if (!cancelled) setMemoryUsage(usage)
       })
     }
-    poll()
-    const interval = setInterval(poll, 5000)
+    const startPolling = (): void => {
+      if (interval) return
+      poll()
+      interval = setInterval(poll, 5000)
+    }
+    const stopPolling = (): void => {
+      if (!interval) return
+      clearInterval(interval)
+      interval = null
+    }
+    const handleVisibilityChange = (): void => {
+      if (document.hidden) stopPolling()
+      else startPolling()
+    }
+
+    if (!document.hidden) startPolling()
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => {
       cancelled = true
-      clearInterval(interval)
+      stopPolling()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [])
 
@@ -58,8 +80,11 @@ export default function App(): JSX.Element {
   // Um BrowserView sempre fica por cima do DOM da janela (camada nativa, fora do
   // stacking context da página), então os modais abaixo ficariam invisíveis atrás
   // do serviço ativo se o processo principal não desanexasse o BrowserView enquanto
-  // o overlay estiver aberto (ver ServicesManager.setOverlayOpen).
-  const overlayOpen = modalOpen || workspaceModalOpen || paletteOpen || settingsOpen
+  // o overlay estiver aberto (ver ServicesManager.setOverlayOpen). O cartão de
+  // onboarding entra na mesma regra por segurança, mesmo só aparecendo na prática
+  // quando ainda não há nenhum serviço (logo, nenhum BrowserView pra esconder).
+  const onboardingOpen = Boolean(state && !state.onboardingDismissed)
+  const overlayOpen = modalOpen || workspaceModalOpen || paletteOpen || settingsOpen || onboardingOpen
   useEffect(() => {
     window.deskbox.setOverlayOpen(overlayOpen)
   }, [overlayOpen])
@@ -107,6 +132,7 @@ export default function App(): JSX.Element {
         onSelect={(id) => window.deskbox.selectService(id)}
         onRemove={(id) => window.deskbox.removeService(id)}
         onReorder={(order) => window.deskbox.reorderServices(order)}
+        onMoveToWorkspace={(instanceId, workspaceId) => window.deskbox.moveServiceToWorkspace(instanceId, workspaceId)}
         onAddClick={() => setModalOpen(true)}
         onThemeToggle={() => window.deskbox.setTheme(nextTheme[state.theme])}
         onOpenPalette={() => setPaletteOpen(true)}
@@ -117,7 +143,9 @@ export default function App(): JSX.Element {
         onRemoveWorkspace={(id) => window.deskbox.removeWorkspace(id)}
       />
       <main className="content-area">
-        {servicesInActiveWorkspace.length === 0 && <EmptyState onAddClick={() => setModalOpen(true)} />}
+        {servicesInActiveWorkspace.length === 0 && (
+          <EmptyState catalog={catalog} onAddClick={() => setModalOpen(true)} onQuickAdd={handleAddFromCatalog} />
+        )}
       </main>
       {modalOpen && (
         <AddServiceModal
@@ -147,8 +175,15 @@ export default function App(): JSX.Element {
         />
       )}
       {settingsOpen && (
-        <SettingsModal hasPassword={state.hasPassword} proxy={state.proxy} onClose={() => setSettingsOpen(false)} />
+        <SettingsModal
+          hasPassword={state.hasPassword}
+          proxy={state.proxy}
+          hibernateAfterMinutes={state.hibernateAfterMinutes}
+          onClose={() => setSettingsOpen(false)}
+        />
       )}
+      {onboardingOpen && <Onboarding onDismiss={() => window.deskbox.dismissOnboarding()} />}
+      <ToastHost />
     </div>
   )
 }
