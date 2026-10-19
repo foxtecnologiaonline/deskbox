@@ -1,7 +1,16 @@
 name: Build Windows installer
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      build_target:
+        description: 'O que gerar'
+        type: choice
+        default: 'ambos'
+        options:
+          - ambos
+          - portable
+          - instalador
 
 permissions:
   contents: read
@@ -20,7 +29,17 @@ jobs:
 
       - run: npm run build
 
-      - run: npx electron-builder --win --publish=never
+      - name: Build (ambos)
+        if: ${{ inputs.build_target == 'ambos' }}
+        run: npx electron-builder --win --publish=never
+
+      - name: Build (só portable)
+        if: ${{ inputs.build_target == 'portable' }}
+        run: npx electron-builder --win portable --publish=never
+
+      - name: Build (só instalador)
+        if: ${{ inputs.build_target == 'instalador' }}
+        run: npx electron-builder --win nsis --publish=never
 
       # Sem certificado de assinatura de código: o instalador funciona
       # normalmente, mas o Windows SmartScreen mostra um aviso de "editor
