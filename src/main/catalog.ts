@@ -6,6 +6,7 @@ function entry(id: string, name: string, url: string, domain: string, category: 
 
 export const CATALOG: CatalogEntry[] = [
   entry('whatsapp', 'WhatsApp', 'https://web.whatsapp.com', 'web.whatsapp.com', 'Mensagens'),
+  entry('whatsapp-business', 'WhatsApp Business', 'https://web.whatsapp.com', 'web.whatsapp.com', 'Mensagens'),
   entry('telegram', 'Telegram', 'https://web.telegram.org/a/', 'web.telegram.org', 'Mensagens'),
   entry('messenger', 'Messenger', 'https://www.messenger.com', 'www.messenger.com', 'Mensagens'),
   entry('discord', 'Discord', 'https://discord.com/app', 'discord.com', 'Mensagens'),
