@@ -45,7 +45,7 @@ export default function CommandPalette({
           id: `service:${service.instanceId}`,
           label: service.name,
           sublabel: inOtherWorkspace ? workspaceById.get(service.workspaceId)?.name : undefined,
-          icon: faviconUrl(service.domain),
+          icon: service.iconUrl || faviconUrl(service.domain),
           onRun: () => onSelectService(service.instanceId)
         }
       })

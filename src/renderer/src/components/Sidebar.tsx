@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import type { ServiceInstance, Theme, Workspace } from '@shared/types'
+import type { ServiceInstance, SidebarDensity, Theme, Workspace } from '@shared/types'
 import { faviconUrl } from '@shared/favicon'
 import WorkspaceSwitcher from './WorkspaceSwitcher'
+import ServiceContextMenu from './ServiceContextMenu'
 
 const THEME_ICON: Record<Theme, string> = { system: '🖥️', light: '☀️', dark: '🌙' }
 const THEME_LABEL: Record<Theme, string> = { system: 'Sistema', light: 'Claro', dark: 'Escuro' }
@@ -13,11 +14,14 @@ interface SidebarProps {
   activeInstanceId: string | null
   theme: Theme
   hasPassword: boolean
+  density: SidebarDensity
   memoryUsage: Record<string, number>
   onSelect: (instanceId: string) => void
   onRemove: (instanceId: string) => void
   onReorder: (order: string[]) => void
   onMoveToWorkspace: (instanceId: string, workspaceId: string) => void
+  onTogglePinned: (instanceId: string) => void
+  onDuplicate: (service: ServiceInstance) => void
   onAddClick: () => void
   onThemeToggle: () => void
   onOpenPalette: () => void
@@ -26,6 +30,7 @@ interface SidebarProps {
   onSelectWorkspace: (workspaceId: string) => void
   onAddWorkspaceClick: () => void
   onRemoveWorkspace: (workspaceId: string) => void
+  onContextMenuOpenChange: (open: boolean) => void
 }
 
 export default function Sidebar({
@@ -35,11 +40,14 @@ export default function Sidebar({
   activeInstanceId,
   theme,
   hasPassword,
+  density,
   memoryUsage,
   onSelect,
   onRemove,
   onReorder,
   onMoveToWorkspace,
+  onTogglePinned,
+  onDuplicate,
   onAddClick,
   onThemeToggle,
   onOpenPalette,
@@ -47,13 +55,17 @@ export default function Sidebar({
   onLockNow,
   onSelectWorkspace,
   onAddWorkspaceClick,
-  onRemoveWorkspace
+  onRemoveWorkspace,
+  onContextMenuOpenChange
 }: SidebarProps): JSX.Element {
   const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ instanceId: string; x: number; y: number } | null>(null)
   const sorted = [...services].sort((a, b) => a.order - b.order)
   const totalMemoryMb = Object.values(memoryUsage).reduce((sum, mb) => sum + mb, 0)
 
   function handleDrop(targetId: string): void {
+    setDragOverId(null)
     if (!draggingId || draggingId === targetId) return
     const order = sorted.map((s) => s.instanceId)
     const from = order.indexOf(draggingId)
@@ -64,8 +76,15 @@ export default function Sidebar({
     setDraggingId(null)
   }
 
+  function closeContextMenu(): void {
+    setContextMenu(null)
+    onContextMenuOpenChange(false)
+  }
+
+  const contextMenuService = contextMenu ? services.find((s) => s.instanceId === contextMenu.instanceId) : undefined
+
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" data-density={density}>
       <WorkspaceSwitcher
         workspaces={workspaces}
         activeWorkspaceId={activeWorkspaceId}
@@ -83,12 +102,22 @@ export default function Sidebar({
         {sorted.map((service) => (
           <div
             key={service.instanceId}
-            className={`service-icon-wrap ${service.instanceId === activeInstanceId ? 'active' : ''} ${service.hibernated ? 'hibernated' : ''}`}
+            className={`service-icon-wrap ${service.instanceId === activeInstanceId ? 'active' : ''} ${service.hibernated ? 'hibernated' : ''} ${dragOverId === service.instanceId && draggingId && draggingId !== service.instanceId ? 'drag-over' : ''}`}
             draggable
             onDragStart={() => setDraggingId(service.instanceId)}
-            onDragEnd={() => setDraggingId(null)}
+            onDragEnd={() => {
+              setDraggingId(null)
+              setDragOverId(null)
+            }}
             onDragOver={(e) => e.preventDefault()}
+            onDragEnter={() => setDragOverId(service.instanceId)}
+            onDragLeave={() => setDragOverId((current) => (current === service.instanceId ? null : current))}
             onDrop={() => handleDrop(service.instanceId)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setContextMenu({ instanceId: service.instanceId, x: e.clientX, y: e.clientY })
+              onContextMenuOpenChange(true)
+            }}
             title={
               service.hibernated
                 ? `${service.name} (hibernado — clique para reativar)`
@@ -98,8 +127,9 @@ export default function Sidebar({
             }
           >
             <button className="service-icon" onClick={() => onSelect(service.instanceId)}>
-              <img src={faviconUrl(service.domain)} alt={service.name} loading="lazy" />
+              <img src={service.iconUrl || faviconUrl(service.domain)} alt={service.name} loading="lazy" />
               {service.loading && !service.hibernated && <span className="service-spinner" />}
+              {service.pinned && <span className="pin-badge" title="Fixado — nunca hiberna">📌</span>}
               {service.unreadCount > 0 && (
                 <span className="unread-badge">{service.unreadCount > 99 ? '99+' : service.unreadCount}</span>
               )}
@@ -141,6 +171,17 @@ export default function Sidebar({
           {THEME_ICON[theme]}
         </button>
       </div>
+      {contextMenu && contextMenuService && (
+        <ServiceContextMenu
+          service={contextMenuService}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={closeContextMenu}
+          onTogglePinned={() => onTogglePinned(contextMenuService.instanceId)}
+          onDuplicate={() => onDuplicate(contextMenuService)}
+          onRemove={() => onRemove(contextMenuService.instanceId)}
+        />
+      )}
     </aside>
   )
 }

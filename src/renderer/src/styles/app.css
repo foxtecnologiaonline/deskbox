@@ -48,15 +48,14 @@ html,
   height: 32px;
   border-radius: 50%;
   border: 2px solid transparent;
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-on-sidebar);
+  color: white;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
 
 .workspace-pill-wrap.active .workspace-pill {
-  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .workspace-pill-wrap.drop-target .workspace-pill {
@@ -610,6 +609,23 @@ html,
   font-size: 13px;
 }
 
+.settings-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.settings-checkbox-label:last-child {
+  margin-bottom: 0;
+}
+
+.settings-checkbox-label input {
+  cursor: pointer;
+}
+
 .settings-select-label select {
   background: var(--input-bg);
   border: 1px solid var(--border);
@@ -683,4 +699,84 @@ html,
 
 .onboarding-card .primary-button {
   width: 100%;
+}
+
+.pin-badge {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  font-size: 10px;
+  line-height: 1;
+  background: var(--bg-sidebar);
+  border-radius: 50%;
+  padding: 1px;
+}
+
+.service-icon-wrap.drag-over::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 2px;
+  right: 2px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.context-menu {
+  position: absolute;
+  z-index: 15;
+  background: var(--modal-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.context-menu button {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.context-menu button:hover {
+  background: var(--input-bg);
+}
+
+.context-menu button.context-menu-danger {
+  color: var(--danger);
+}
+
+.sidebar[data-density='compact'] {
+  width: 56px;
+}
+
+.sidebar[data-density='compact'] .service-icon-wrap {
+  width: 36px;
+  height: 36px;
+}
+
+.sidebar[data-density='compact'] .service-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+}
+
+.sidebar[data-density='compact'] .service-icon img {
+  width: 20px;
+  height: 20px;
+}
+
+.sidebar[data-density='compact'] .add-service {
+  width: 32px;
+  height: 32px;
 }

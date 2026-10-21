@@ -22,5 +22,11 @@ export const IPC = {
   EXPORT_CONFIG: 'deskbox:export-config',
   IMPORT_CONFIG: 'deskbox:import-config',
   MOVE_SERVICE_TO_WORKSPACE: 'deskbox:move-service-to-workspace',
-  DISMISS_ONBOARDING: 'deskbox:dismiss-onboarding'
+  DISMISS_ONBOARDING: 'deskbox:dismiss-onboarding',
+  TOGGLE_SERVICE_PINNED: 'deskbox:toggle-service-pinned',
+  SET_SIDEBAR_DENSITY: 'deskbox:set-sidebar-density',
+  SET_NOTIFICATIONS_ENABLED: 'deskbox:set-notifications-enabled',
+  SET_MINIMIZE_TO_TRAY: 'deskbox:set-minimize-to-tray',
+  SET_LAUNCH_AT_LOGIN: 'deskbox:set-launch-at-login',
+  SET_START_MINIMIZED: 'deskbox:set-start-minimized'
 } as const

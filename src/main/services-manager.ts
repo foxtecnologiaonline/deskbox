@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { BrowserView, BrowserWindow, ipcMain, session, app } from 'electron'
+import { BrowserView, BrowserWindow, ipcMain, session, app, Notification } from 'electron'
 import { join } from 'path'
 import type {
   AddServicePayload,
@@ -9,13 +9,15 @@ import type {
   ProxyConfig,
   RendererState,
   ServiceInstance,
-  SetPasswordResult
+  SetPasswordResult,
+  SidebarDensity
 } from '@shared/types'
 import { IPC } from '@shared/ipc'
 import { CATALOG, findCatalogEntry } from './catalog'
 import { hashPassword, verifyPassword } from './password'
 
-const SIDEBAR_WIDTH = 72
+const SIDEBAR_WIDTH_COMFORTABLE = 72
+const SIDEBAR_WIDTH_COMPACT = 56
 const HIBERNATION_SWEEP_INTERVAL_MS = 60 * 1000
 
 function domainFromUrl(url: string): string {
@@ -40,6 +42,8 @@ export class ServicesManager {
   private overlayOpen = false
   /** true quando o app está trancado por senha mestre — nenhum BrowserView é exibido. */
   private locked = false
+  /** Coalesce múltiplas chamadas síncronas de broadcastState() num único envio de IPC. */
+  private broadcastScheduled = false
 
   constructor(
     window: BrowserWindow,
@@ -195,6 +199,57 @@ export class ServicesManager {
     return this.getEnrichedState()
   }
 
+  /** `pinned: true` faz o serviço nunca hibernar sozinho, mesmo com hibernação automática ativa. */
+  toggleServicePinned(instanceId: string): RendererState {
+    if (this.locked) return this.getEnrichedState()
+    this.setState((s) => ({
+      ...s,
+      services: s.services.map((service) =>
+        service.instanceId === instanceId ? { ...service, pinned: !service.pinned } : service
+      )
+    }))
+    this.broadcastState()
+    return this.getEnrichedState()
+  }
+
+  setSidebarDensity(density: SidebarDensity): RendererState {
+    if (this.locked) return this.getEnrichedState()
+    this.setState((s) => ({ ...s, sidebarDensity: density }))
+    this.layout()
+    this.broadcastState()
+    return this.getEnrichedState()
+  }
+
+  setNotificationsEnabled(enabled: boolean): RendererState {
+    if (this.locked) return this.getEnrichedState()
+    this.setState((s) => ({ ...s, notificationsEnabled: enabled }))
+    this.broadcastState()
+    return this.getEnrichedState()
+  }
+
+  /** Persistência pura — o efeito colateral (criar/destruir o Tray) é feito pelo chamador em index.ts. */
+  setMinimizeToTray(enabled: boolean): RendererState {
+    if (this.locked) return this.getEnrichedState()
+    this.setState((s) => ({ ...s, minimizeToTray: enabled }))
+    this.broadcastState()
+    return this.getEnrichedState()
+  }
+
+  /** Persistência pura — o efeito colateral (app.setLoginItemSettings) é feito pelo chamador em index.ts. */
+  setLaunchAtLogin(enabled: boolean): RendererState {
+    if (this.locked) return this.getEnrichedState()
+    this.setState((s) => ({ ...s, launchAtLogin: enabled }))
+    this.broadcastState()
+    return this.getEnrichedState()
+  }
+
+  setStartMinimized(enabled: boolean): RendererState {
+    if (this.locked) return this.getEnrichedState()
+    this.setState((s) => ({ ...s, startMinimized: enabled }))
+    this.broadcastState()
+    return this.getEnrichedState()
+  }
+
   /**
    * Move um serviço pra outro workspace (drag-and-drop no switcher). Se o serviço
    * movido era o ativo, o workspace atual continua em foco e um irmão que ficou
@@ -264,16 +319,28 @@ export class ServicesManager {
       for (const instanceId of [...this.views.keys()]) {
         this.destroyView(instanceId)
       }
+      // Um arquivo exportado por uma versão mais antiga do Deskbox pode não ter
+      // os campos mais novos (pinned/iconUrl por serviço, densidade, notificações,
+      // bandeja) — ?? cobre esse caso com os valores padrão em vez de undefined.
       this.setState((s) => ({
         ...s,
-        services: config.services,
+        services: config.services.map((service) => ({
+          ...service,
+          pinned: service.pinned ?? false,
+          iconUrl: service.iconUrl ?? null
+        })),
         workspaces: config.workspaces,
         activeWorkspaceId,
         activeInstanceId: null,
         theme: config.theme,
         proxy: config.proxy,
         hibernateAfterMinutes: config.hibernateAfterMinutes,
-        onboardingDismissed: config.onboardingDismissed
+        onboardingDismissed: config.onboardingDismissed,
+        sidebarDensity: config.sidebarDensity ?? 'comfortable',
+        notificationsEnabled: config.notificationsEnabled ?? true,
+        minimizeToTray: config.minimizeToTray ?? s.minimizeToTray,
+        launchAtLogin: config.launchAtLogin ?? s.launchAtLogin,
+        startMinimized: config.startMinimized ?? s.startMinimized
       }))
       const firstInWorkspace = this.servicesInWorkspace(this.getState().activeWorkspaceId)[0]
       if (firstInWorkspace) {
@@ -340,14 +407,30 @@ export class ServicesManager {
   private handleUnreadMessage = (event: Electron.IpcMainEvent, count: number): void => {
     const instanceId = this.webContentsIdToInstance.get(event.sender.id)
     if (!instanceId) return
+    const service = this.getState().services.find((s) => s.instanceId === instanceId)
+    const previousCount = service?.unreadCount ?? 0
     this.setState((state) => ({
       ...state,
-      services: state.services.map((service) =>
-        service.instanceId === instanceId ? { ...service, unreadCount: count } : service
-      )
+      services: state.services.map((s) => (s.instanceId === instanceId ? { ...s, unreadCount: count } : s))
     }))
     this.updateBadge()
     this.broadcastState()
+    if (service && count > previousCount) {
+      this.notifyNewUnread(service)
+    }
+  }
+
+  /** Notificação nativa do SO quando um serviço ganha mensagem(ns) não lida(s) com a janela em segundo plano. */
+  private notifyNewUnread(service: ServiceInstance): void {
+    if (this.locked || !this.getState().notificationsEnabled) return
+    if (this.window.isFocused() || !Notification.isSupported()) return
+    const notification = new Notification({ title: service.name, body: 'Nova mensagem' })
+    notification.on('click', () => {
+      this.window.show()
+      this.window.focus()
+      this.selectService(service.instanceId)
+    })
+    notification.show()
   }
 
   getCatalog() {
@@ -399,6 +482,11 @@ export class ServicesManager {
         proxy: null,
         hibernateAfterMinutes: state.hibernateAfterMinutes,
         onboardingDismissed: state.onboardingDismissed,
+        sidebarDensity: state.sidebarDensity,
+        notificationsEnabled: state.notificationsEnabled,
+        minimizeToTray: state.minimizeToTray,
+        launchAtLogin: state.launchAtLogin,
+        startMinimized: state.startMinimized,
         hasPassword,
         locked: true
       }
@@ -437,7 +525,9 @@ export class ServicesManager {
       muted: false,
       unreadCount: 0,
       hibernated: false,
-      loading: true
+      loading: true,
+      pinned: false,
+      iconUrl: payload.iconUrl?.trim() || null
     }
     this.setState((s) => ({
       ...s,
@@ -657,13 +747,14 @@ export class ServicesManager {
   }
 
   private sweepHibernation(): void {
-    const hibernateAfterMinutes = this.getState().hibernateAfterMinutes
-    if (hibernateAfterMinutes === null) return
-    const hibernateAfterMs = hibernateAfterMinutes * 60 * 1000
+    const state = this.getState()
+    if (state.hibernateAfterMinutes === null) return
+    const hibernateAfterMs = state.hibernateAfterMinutes * 60 * 1000
+    const pinnedIds = new Set(state.services.filter((s) => s.pinned).map((s) => s.instanceId))
     const now = Date.now()
     let changed = false
     for (const instanceId of [...this.views.keys()]) {
-      if (instanceId === this.currentlyShownInstanceId) continue
+      if (instanceId === this.currentlyShownInstanceId || pinnedIds.has(instanceId)) continue
       const lastActive = this.lastActiveAt.get(instanceId) ?? now
       if (now - lastActive >= hibernateAfterMs) {
         this.destroyView(instanceId)
@@ -677,11 +768,12 @@ export class ServicesManager {
     if (!this.currentlyShownInstanceId) return
     const view = this.views.get(this.currentlyShownInstanceId)
     if (!view) return
+    const sidebarWidth = this.getState().sidebarDensity === 'compact' ? SIDEBAR_WIDTH_COMPACT : SIDEBAR_WIDTH_COMFORTABLE
     const bounds = this.window.getContentBounds()
     view.setBounds({
-      x: SIDEBAR_WIDTH,
+      x: sidebarWidth,
       y: 0,
-      width: Math.max(0, bounds.width - SIDEBAR_WIDTH),
+      width: Math.max(0, bounds.width - sidebarWidth),
       height: bounds.height
     })
   }
@@ -695,7 +787,20 @@ export class ServicesManager {
     }
   }
 
+  /**
+   * Agenda o envio via microtask em vez de mandar o IPC a cada chamada — várias
+   * mutações de estado síncronas (ex.: setState + updateBadge) na mesma função
+   * acabavam gerando múltiplos broadcastState() seguidos; coalescidos numa só
+   * tick, só o estado final (já computado em getEnrichedState() no flush) é
+   * enviado uma única vez.
+   */
   private broadcastState(): void {
-    this.window.webContents.send(IPC.STATE_CHANGED, this.getEnrichedState())
+    if (this.broadcastScheduled) return
+    this.broadcastScheduled = true
+    queueMicrotask(() => {
+      this.broadcastScheduled = false
+      if (this.window.isDestroyed()) return
+      this.window.webContents.send(IPC.STATE_CHANGED, this.getEnrichedState())
+    })
   }
 }

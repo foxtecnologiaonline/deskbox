@@ -1,4 +1,5 @@
 import type { Workspace } from '@shared/types'
+import { workspaceColor } from '@shared/workspaceColor'
 
 interface WorkspaceSwitcherProps {
   workspaces: Workspace[]
@@ -39,7 +40,11 @@ export default function WorkspaceSwitcher({
             if (draggingServiceId) onDropService(draggingServiceId, workspace.id)
           }}
         >
-          <button className="workspace-pill" onClick={() => onSelect(workspace.id)}>
+          <button
+            className="workspace-pill"
+            style={{ backgroundColor: workspaceColor(workspace.id) }}
+            onClick={() => onSelect(workspace.id)}
+          >
             {initials(workspace.name)}
           </button>
           {workspaces.length > 1 && (

@@ -14,7 +14,12 @@ const DEFAULT_STATE: DeskboxState = {
   passwordHash: null,
   proxy: null,
   hibernateAfterMinutes: 10,
-  onboardingDismissed: false
+  onboardingDismissed: false,
+  sidebarDensity: 'comfortable',
+  notificationsEnabled: true,
+  minimizeToTray: false,
+  launchAtLogin: false,
+  startMinimized: false
 }
 
 export class Store {
@@ -32,11 +37,14 @@ export class Store {
         const raw = readFileSync(this.filePath, 'utf-8')
         const parsed = JSON.parse(raw)
         const merged: DeskboxState = { ...DEFAULT_STATE, ...parsed }
-        // Normaliza configs antigas (anteriores a workspaces) que podem não ter workspaceId.
+        // Normaliza configs antigas (anteriores a workspaces/pin/ícone manual) que podem
+        // não ter esses campos.
         const fallbackWorkspaceId = merged.workspaces[0]?.id ?? DEFAULT_WORKSPACE_ID
         merged.services = merged.services.map((service) => ({
           ...service,
-          workspaceId: service.workspaceId ?? fallbackWorkspaceId
+          workspaceId: service.workspaceId ?? fallbackWorkspaceId,
+          pinned: service.pinned ?? false,
+          iconUrl: service.iconUrl ?? null
         }))
         return merged
       }

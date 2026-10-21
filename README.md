@@ -43,6 +43,14 @@ npm run dist:linux # empacota AppImage + .deb
 - Arraste um serviço até um workspace na sidebar pra **movê-lo** de workspace. Ícone mostra um spinner enquanto a página carrega (ex.: saindo de hibernação).
 - Empty state com chips de adição rápida dos apps mais populares, e um cartão de boas-vindas dispensável no primeiro uso.
 - Toasts discretos de confirmação pra ações como salvar senha/proxy/hibernação.
+- **Bandeja do sistema**: fechar a janela pode minimizar pra bandeja em vez de encerrar (as sessões continuam rodando), com opção de iniciar com o sistema e/ou já minimizado — tudo no modal de Configurações.
+- **Notificações nativas** de mensagem nova quando o Deskbox está em segundo plano (clique na notificação abre o serviço direto); pode ser desligado nas Configurações.
+- **Fixar serviço** (clique direito no ícone → "Fixar"): aquele serviço nunca hiberna sozinho, mesmo com a hibernação automática ativa.
+- **Adicionar outra conta** direto pelo clique direito no ícone do serviço, sem precisar abrir o catálogo completo de novo.
+- Ícone de serviço personalizado: ao adicionar um site customizado, dá pra informar uma URL de ícone própria em vez de depender do favicon automático.
+- Indicador visual de onde o item vai cair ao reordenar a sidebar por arrastar-e-soltar.
+- Cada workspace tem uma cor própria (determinística, sem precisar configurar nada) pra diferenciar mais rápido no switcher.
+- **Densidade da sidebar** (confortável/compacta) ajustável nas Configurações, pra quem tem muitos serviços abertos.
 
 ## Tamanho do build
 

@@ -1,11 +1,16 @@
 import { useState } from 'react'
-import type { ProxyConfig } from '@shared/types'
+import type { ProxyConfig, SidebarDensity } from '@shared/types'
 import { showToast } from '../toast'
 
 interface SettingsModalProps {
   hasPassword: boolean
   proxy: ProxyConfig | null
   hibernateAfterMinutes: number | null
+  sidebarDensity: SidebarDensity
+  notificationsEnabled: boolean
+  minimizeToTray: boolean
+  launchAtLogin: boolean
+  startMinimized: boolean
   onClose: () => void
 }
 
@@ -16,10 +21,20 @@ const HIBERNATE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'never', label: 'Nunca hibernar' }
 ]
 
+const DENSITY_OPTIONS: Array<{ value: SidebarDensity; label: string }> = [
+  { value: 'comfortable', label: 'Confortável' },
+  { value: 'compact', label: 'Compacta' }
+]
+
 export default function SettingsModal({
   hasPassword,
   proxy,
   hibernateAfterMinutes,
+  sidebarDensity,
+  notificationsEnabled,
+  minimizeToTray,
+  launchAtLogin,
+  startMinimized,
   onClose
 }: SettingsModalProps): JSX.Element {
   const [currentPassword, setCurrentPassword] = useState('')
@@ -59,6 +74,27 @@ export default function SettingsModal({
     const minutes = e.target.value === 'never' ? null : Number(e.target.value)
     await window.deskbox.setHibernateAfterMinutes(minutes)
     showToast('Hibernação atualizada.')
+  }
+
+  async function handleDensityChange(e: React.ChangeEvent<HTMLSelectElement>): Promise<void> {
+    await window.deskbox.setSidebarDensity(e.target.value as SidebarDensity)
+    showToast('Densidade da sidebar atualizada.')
+  }
+
+  async function handleNotificationsChange(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    await window.deskbox.setNotificationsEnabled(e.target.checked)
+  }
+
+  async function handleMinimizeToTrayChange(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    await window.deskbox.setMinimizeToTray(e.target.checked)
+  }
+
+  async function handleLaunchAtLoginChange(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    await window.deskbox.setLaunchAtLogin(e.target.checked)
+  }
+
+  async function handleStartMinimizedChange(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    await window.deskbox.setStartMinimized(e.target.checked)
   }
 
   async function handleExport(): Promise<void> {
@@ -169,6 +205,44 @@ export default function SettingsModal({
                 </option>
               ))}
             </select>
+          </label>
+        </section>
+
+        <section className="settings-section">
+          <h3>Aparência</h3>
+          <label className="settings-select-label">
+            Densidade da sidebar
+            <select value={sidebarDensity} onChange={handleDensityChange}>
+              {DENSITY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
+
+        <section className="settings-section">
+          <h3>Notificações</h3>
+          <label className="settings-checkbox-label">
+            <input type="checkbox" checked={notificationsEnabled} onChange={handleNotificationsChange} />
+            Notificar mensagens novas quando o Deskbox estiver em segundo plano
+          </label>
+        </section>
+
+        <section className="settings-section">
+          <h3>Inicialização e bandeja</h3>
+          <label className="settings-checkbox-label">
+            <input type="checkbox" checked={minimizeToTray} onChange={handleMinimizeToTrayChange} />
+            Minimizar pra bandeja do sistema ao fechar a janela (em vez de encerrar)
+          </label>
+          <label className="settings-checkbox-label">
+            <input type="checkbox" checked={launchAtLogin} onChange={handleLaunchAtLoginChange} />
+            Iniciar o Deskbox junto com o sistema
+          </label>
+          <label className="settings-checkbox-label">
+            <input type="checkbox" checked={startMinimized} onChange={handleStartMinimizedChange} />
+            Iniciar minimizado (só na bandeja)
           </label>
         </section>
 

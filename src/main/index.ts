@@ -1,8 +1,15 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell, Tray, Menu } from 'electron'
 import { join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { IPC } from '@shared/ipc'
-import type { AddServicePayload, ExportedConfig, ImportConfigResult, ProxyConfig, SetPasswordPayload } from '@shared/types'
+import type {
+  AddServicePayload,
+  ExportedConfig,
+  ImportConfigResult,
+  ProxyConfig,
+  SetPasswordPayload,
+  SidebarDensity
+} from '@shared/types'
 import { Store } from './store'
 import { ServicesManager } from './services-manager'
 
@@ -26,6 +33,55 @@ let mainWindow: BrowserWindow | null = null
 // via rebindWindow() em vez de ser recriado (ver ServicesManager.rebindWindow).
 let manager: ServicesManager | null = null
 const store = new Store()
+let tray: Tray | null = null
+// true só entre o clique em "Sair" do tray e o app.quit() de fato — sem essa
+// flag, o handler de 'close' (que vira minimizar pra bandeja) interceptaria
+// até o fechamento disparado pelo próprio menu de saída.
+let isQuitting = false
+
+/** Cria o ícone da bandeja só se algum recurso que depende dele estiver ativo. */
+function syncTray(): void {
+  const state = store.getState()
+  const needed = state.minimizeToTray || state.startMinimized
+  if (needed && !tray && appIcon) {
+    tray = new Tray(appIcon)
+    tray.setToolTip('Deskbox')
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: 'Abrir Deskbox', click: () => showMainWindow() },
+        { type: 'separator' },
+        {
+          label: 'Sair',
+          click: () => {
+            isQuitting = true
+            app.quit()
+          }
+        }
+      ])
+    )
+    tray.on('click', () => showMainWindow())
+  } else if (!needed && tray) {
+    tray.destroy()
+    tray = null
+  }
+}
+
+// true só entre um clique explícito em "Abrir Deskbox"/no ícone do tray e o
+// próximo 'ready-to-show' — garante que esse pedido explícito sempre mostra a
+// janela, mesmo com "iniciar minimizado" ativo (que só deve valer pro boot do
+// app, não pra reabrir de propósito depois de fechada de verdade).
+let forceShowOnReady = false
+
+function showMainWindow(): void {
+  if (!mainWindow) {
+    forceShowOnReady = true
+    createMainWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
 
 // Resolve o ícone customizado em qualquer contexto de execução:
 // - app empacotado / `npm run build` + preview: out/renderer/favicon.png está
@@ -58,7 +114,34 @@ function createMainWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
+  // Sem isso, `mainWindow` continuaria apontando pra um BrowserWindow já destruído
+  // depois de um close "de verdade" (minimizeToTray desligado) — showMainWindow()
+  // leria esse ponteiro obsoleto e chamaria métodos num objeto destruído.
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
+
+  mainWindow.on('ready-to-show', () => {
+    // !tray cobre o caso (defensivo) de appIcon não ter sido resolvido: sem
+    // tray pra reabrir, "iniciar minimizado" deixaria o app inteiramente
+    // inacessível — melhor mostrar a janela do que travar o usuário sem saída.
+    if (forceShowOnReady || !store.getState().startMinimized || !tray) {
+      forceShowOnReady = false
+      mainWindow?.show()
+    }
+  })
+
+  // Fechar a janela (botão "x") minimiza pra bandeja em vez de encerrar o app,
+  // quando habilitado — a sessão dos serviços continua rodando em memória.
+  // isQuitting é setado só pelo "Sair" do menu do tray, que precisa fechar de
+  // verdade. && tray evita a mesma armadilha: sem ícone na bandeja pra reabrir,
+  // minimizar pra "lugar nenhum" deixaria o app inacessível sem matar o processo.
+  mainWindow.on('close', (event) => {
+    if (!isQuitting && store.getState().minimizeToTray && tray) {
+      event.preventDefault()
+      mainWindow?.hide()
+    }
+  })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -142,6 +225,26 @@ function registerIpcHandlers(): void {
       return { ok: false, error: 'Arquivo inválido ou corrompido.' }
     }
   })
+  ipcMain.handle(IPC.TOGGLE_SERVICE_PINNED, (_event, instanceId: string) => manager!.toggleServicePinned(instanceId))
+  ipcMain.handle(IPC.SET_SIDEBAR_DENSITY, (_event, density: SidebarDensity) => manager!.setSidebarDensity(density))
+  ipcMain.handle(IPC.SET_NOTIFICATIONS_ENABLED, (_event, enabled: boolean) =>
+    manager!.setNotificationsEnabled(enabled)
+  )
+  ipcMain.handle(IPC.SET_MINIMIZE_TO_TRAY, (_event, enabled: boolean) => {
+    const state = manager!.setMinimizeToTray(enabled)
+    syncTray()
+    return state
+  })
+  ipcMain.handle(IPC.SET_LAUNCH_AT_LOGIN, (_event, enabled: boolean) => {
+    const state = manager!.setLaunchAtLogin(enabled)
+    app.setLoginItemSettings({ openAtLogin: enabled })
+    return state
+  })
+  ipcMain.handle(IPC.SET_START_MINIMIZED, (_event, enabled: boolean) => {
+    const state = manager!.setStartMinimized(enabled)
+    syncTray()
+    return state
+  })
 }
 
 app.whenReady().then(() => {
@@ -149,14 +252,18 @@ app.whenReady().then(() => {
     app.dock?.setIcon(appIcon)
   }
 
+  // Reaplica a preferência salva no SO a cada boot — cobre o caso de o registro de
+  // login do SO ter sido perdido (reinstalação, perfil novo) enquanto a config salva
+  // continuava com launchAtLogin: true.
+  app.setLoginItemSettings({ openAtLogin: store.getState().launchAtLogin })
+
   // Registrado uma única vez: os handlers leem `manager` em tempo de chamada (não de
   // definição), então continuam válidos mesmo depois de um rebindWindow().
   registerIpcHandlers()
   createMainWindow()
+  syncTray()
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
-  })
+  app.on('activate', () => showMainWindow())
 })
 
 app.on('window-all-closed', () => {

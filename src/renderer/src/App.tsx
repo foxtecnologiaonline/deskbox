@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import type { CatalogEntry, RendererState, Theme } from '@shared/types'
+import type { CatalogEntry, RendererState, ServiceInstance, Theme } from '@shared/types'
 import Sidebar from './components/Sidebar'
 import AddServiceModal from './components/AddServiceModal'
 import NewWorkspaceModal from './components/NewWorkspaceModal'
@@ -17,6 +17,7 @@ export default function App(): JSX.Element {
   const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [serviceContextMenuOpen, setServiceContextMenuOpen] = useState(false)
   const [memoryUsage, setMemoryUsage] = useState<Record<string, number>>({})
 
   useEffect(() => {
@@ -42,7 +43,7 @@ export default function App(): JSX.Element {
     const startPolling = (): void => {
       if (interval) return
       poll()
-      interval = setInterval(poll, 5000)
+      interval = setInterval(poll, 15000)
     }
     const stopPolling = (): void => {
       if (!interval) return
@@ -84,7 +85,8 @@ export default function App(): JSX.Element {
   // onboarding entra na mesma regra por segurança, mesmo só aparecendo na prática
   // quando ainda não há nenhum serviço (logo, nenhum BrowserView pra esconder).
   const onboardingOpen = Boolean(state && !state.onboardingDismissed)
-  const overlayOpen = modalOpen || workspaceModalOpen || paletteOpen || settingsOpen || onboardingOpen
+  const overlayOpen =
+    modalOpen || workspaceModalOpen || paletteOpen || settingsOpen || onboardingOpen || serviceContextMenuOpen
   useEffect(() => {
     window.deskbox.setOverlayOpen(overlayOpen)
   }, [overlayOpen])
@@ -99,9 +101,17 @@ export default function App(): JSX.Element {
     setModalOpen(false)
   }, [])
 
-  const handleAddCustom = useCallback(async (name: string, url: string) => {
-    await window.deskbox.addService({ name, url })
+  const handleAddCustom = useCallback(async (name: string, url: string, iconUrl?: string) => {
+    await window.deskbox.addService({ name, url, iconUrl })
     setModalOpen(false)
+  }, [])
+
+  const handleDuplicateService = useCallback(async (service: ServiceInstance) => {
+    if (service.catalogId !== 'custom') {
+      await window.deskbox.addService({ catalogId: service.catalogId })
+    } else {
+      await window.deskbox.addService({ name: service.name, url: service.url, iconUrl: service.iconUrl ?? undefined })
+    }
   }, [])
 
   const handleCreateWorkspace = useCallback(async (name: string) => {
@@ -128,11 +138,15 @@ export default function App(): JSX.Element {
         activeInstanceId={state.activeInstanceId}
         theme={state.theme}
         hasPassword={state.hasPassword}
+        density={state.sidebarDensity}
         memoryUsage={memoryUsage}
         onSelect={(id) => window.deskbox.selectService(id)}
         onRemove={(id) => window.deskbox.removeService(id)}
         onReorder={(order) => window.deskbox.reorderServices(order)}
         onMoveToWorkspace={(instanceId, workspaceId) => window.deskbox.moveServiceToWorkspace(instanceId, workspaceId)}
+        onTogglePinned={(id) => window.deskbox.toggleServicePinned(id)}
+        onDuplicate={handleDuplicateService}
+        onContextMenuOpenChange={setServiceContextMenuOpen}
         onAddClick={() => setModalOpen(true)}
         onThemeToggle={() => window.deskbox.setTheme(nextTheme[state.theme])}
         onOpenPalette={() => setPaletteOpen(true)}
@@ -179,6 +193,11 @@ export default function App(): JSX.Element {
           hasPassword={state.hasPassword}
           proxy={state.proxy}
           hibernateAfterMinutes={state.hibernateAfterMinutes}
+          sidebarDensity={state.sidebarDensity}
+          notificationsEnabled={state.notificationsEnabled}
+          minimizeToTray={state.minimizeToTray}
+          launchAtLogin={state.launchAtLogin}
+          startMinimized={state.startMinimized}
           onClose={() => setSettingsOpen(false)}
         />
       )}

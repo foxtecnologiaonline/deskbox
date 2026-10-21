@@ -6,7 +6,7 @@ interface AddServiceModalProps {
   catalog: CatalogEntry[]
   onClose: () => void
   onAddFromCatalog: (catalogId: string) => void
-  onAddCustom: (name: string, url: string) => void
+  onAddCustom: (name: string, url: string, iconUrl?: string) => void
 }
 
 export default function AddServiceModal({
@@ -19,6 +19,7 @@ export default function AddServiceModal({
   const [customMode, setCustomMode] = useState(false)
   const [customName, setCustomName] = useState('')
   const [customUrl, setCustomUrl] = useState('')
+  const [customIconUrl, setCustomIconUrl] = useState('')
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -33,7 +34,9 @@ export default function AddServiceModal({
     if (!customName.trim() || !customUrl.trim()) return
     let url = customUrl.trim()
     if (!/^https?:\/\//i.test(url)) url = `https://${url}`
-    onAddCustom(customName.trim(), url)
+    let iconUrl = customIconUrl.trim()
+    if (iconUrl && !/^https?:\/\//i.test(iconUrl)) iconUrl = `https://${iconUrl}`
+    onAddCustom(customName.trim(), url, iconUrl || undefined)
   }
 
   return (
@@ -82,6 +85,14 @@ export default function AddServiceModal({
                 value={customUrl}
                 onChange={(e) => setCustomUrl(e.target.value)}
                 placeholder="https://exemplo.com"
+              />
+            </label>
+            <label>
+              URL do ícone (opcional)
+              <input
+                value={customIconUrl}
+                onChange={(e) => setCustomIconUrl(e.target.value)}
+                placeholder="https://exemplo.com/icone.png — deixe em branco pra usar o favicon automático"
               />
             </label>
             <div className="custom-form-actions">

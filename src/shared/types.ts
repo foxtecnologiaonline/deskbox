@@ -13,6 +13,8 @@ export interface Workspace {
   name: string
 }
 
+export type SidebarDensity = 'comfortable' | 'compact'
+
 export interface ServiceInstance {
   instanceId: string
   catalogId: string
@@ -28,6 +30,10 @@ export interface ServiceInstance {
   hibernated: boolean
   /** Calculado em tempo de execução: true enquanto a página está carregando (ex.: saindo de hibernação). */
   loading: boolean
+  /** true = nunca hibernar este serviço, mesmo com hibernação automática ativa. */
+  pinned: boolean
+  /** URL de ícone manual (sobrescreve o favicon automático); só relevante pra sites personalizados. */
+  iconUrl: string | null
 }
 
 /** Estado persistido (Store). `passwordHash` nunca deve ser enviado ao renderer — ver RendererState. */
@@ -43,6 +49,14 @@ export interface DeskboxState {
   hibernateAfterMinutes: number | null
   /** true depois que o usuário fecha o tour de boas-vindas. */
   onboardingDismissed: boolean
+  sidebarDensity: SidebarDensity
+  notificationsEnabled: boolean
+  /** Fechar a janela minimiza pra bandeja do sistema em vez de encerrar o app. */
+  minimizeToTray: boolean
+  /** Inicia o Deskbox junto com o sistema operacional (app.setLoginItemSettings). */
+  launchAtLogin: boolean
+  /** Ao iniciar, não mostra a janela principal (fica só na bandeja). */
+  startMinimized: boolean
 }
 
 export interface ProxyConfig {
@@ -63,6 +77,7 @@ export interface AddServicePayload {
   catalogId?: string
   name?: string
   url?: string
+  iconUrl?: string
 }
 
 export interface SetPasswordPayload {

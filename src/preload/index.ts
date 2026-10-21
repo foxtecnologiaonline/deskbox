@@ -6,6 +6,7 @@ import type {
   ProxyConfig,
   RendererState,
   SetPasswordResult,
+  SidebarDensity,
   Theme
 } from '@shared/types'
 
@@ -36,6 +37,18 @@ const api = {
     ipcRenderer.invoke(IPC.MOVE_SERVICE_TO_WORKSPACE, instanceId, workspaceId),
   exportConfig: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IPC.EXPORT_CONFIG),
   importConfig: (): Promise<ImportConfigResult> => ipcRenderer.invoke(IPC.IMPORT_CONFIG),
+  toggleServicePinned: (instanceId: string): Promise<RendererState> =>
+    ipcRenderer.invoke(IPC.TOGGLE_SERVICE_PINNED, instanceId),
+  setSidebarDensity: (density: SidebarDensity): Promise<RendererState> =>
+    ipcRenderer.invoke(IPC.SET_SIDEBAR_DENSITY, density),
+  setNotificationsEnabled: (enabled: boolean): Promise<RendererState> =>
+    ipcRenderer.invoke(IPC.SET_NOTIFICATIONS_ENABLED, enabled),
+  setMinimizeToTray: (enabled: boolean): Promise<RendererState> =>
+    ipcRenderer.invoke(IPC.SET_MINIMIZE_TO_TRAY, enabled),
+  setLaunchAtLogin: (enabled: boolean): Promise<RendererState> =>
+    ipcRenderer.invoke(IPC.SET_LAUNCH_AT_LOGIN, enabled),
+  setStartMinimized: (enabled: boolean): Promise<RendererState> =>
+    ipcRenderer.invoke(IPC.SET_START_MINIMIZED, enabled),
   onStateChanged: (callback: (state: RendererState) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: RendererState): void => callback(state)
     ipcRenderer.on(IPC.STATE_CHANGED, listener)

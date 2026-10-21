@@ -125,6 +125,39 @@ Mais uma passada de `/code-review` (alto esforço, escopo `src/`) sobre tudo con
 2. **Hash de senha síncrono travava o main process**: `password.ts` usava `scryptSync`, que bloqueia a única thread do processo main por ~100ms+ a cada tentativa de destravar ou trocar senha — nesse intervalo a janela não resiza, nenhum IPC responde, e `before-input-event` (atalhos de teclado) para de funcionar em todos os serviços abertos. Corrigido: `password.ts` reescrito com `scrypt` assíncrono (via `util.promisify`), e `unlock()`/`setPassword()` em `services-manager.ts` agora são `async` e aguardam o hash/verificação sem travar o loop de eventos.
 3. **Reordenar serviços por arrastar tinha inconsistência de direção**: `handleDrop` em `Sidebar.tsx` calculava a posição de destino (`to`) antes de remover o item arrastado do array, então o item caía *depois* do alvo ao arrastar pra frente mas *antes* do alvo ao arrastar pra trás — comportamento inconsistente dependendo da direção do gesto. Corrigido: o índice de destino agora é recalculado depois de remover o item arrastado, então ele sempre cai imediatamente antes do alvo, nas duas direções.
 
+## Leva 2 de melhorias (bandeja, notificações, pin, catálogo, visual, performance)
+
+10 sugestões pedidas pelo usuário, todas implementadas:
+
+**Praticidade**
+- **Bandeja do sistema**: `Tray` criado sob demanda (só se `minimizeToTray` ou `startMinimized` estiverem ativos e o ícone do app tiver sido resolvido) com menu "Abrir Deskbox"/"Sair". Fechar a janela (`close`) faz `preventDefault()` + `hide()` em vez de destruir, quando `minimizeToTray` está ativo — a sessão de cada serviço continua rodando em memória. `launchAtLogin` usa `app.setLoginItemSettings`; `startMinimized` pula o `show()` no `ready-to-show`. Rede de segurança: ambos os comportamentos (fechar pra bandeja, iniciar minimizado) só valem se um `Tray` de fato existir (`&& tray` / `|| !tray`) — sem isso, se o ícone do app não resolvesse (`appIcon` undefined), o usuário ficaria com o app invisível e sem nenhum jeito de reabrir além de matar o processo.
+- **Notificações nativas**: `ServicesManager.notifyNewUnread()` dispara um `Notification` do Electron quando o contador de não lidos de um serviço *aumenta* e a janela não está em foco (`window.isFocused()`); clique na notificação foca a janela e seleciona o serviço. Toggle em Configurações (`notificationsEnabled`).
+- **Fixar serviço**: campo `pinned` em `ServiceInstance`; `sweepHibernation()` ignora instâncias fixadas. Acessível pelo novo menu de contexto (clique direito no ícone).
+
+**Apps/sites**
+- **Adicionar outra conta** pelo menu de contexto: duplica a instância (mesmo `catalogId`, ou nome/URL/ícone se for site personalizado) sem reabrir o catálogo completo.
+- **Catálogo ampliado**: Airtable, Miro, Monday.com, Todoist, Evernote, WeChat. Jira/Confluence ficaram de fora de propósito — exigem subdomínio próprio da empresa, então uma URL genérica no catálogo não funcionaria; o caminho certo pra esses é "+ Adicionar site personalizado" com o domínio da própria instância.
+- **Ícone de serviço manual**: campo opcional de URL de ícone no formulário de site personalizado (`ServiceInstance.iconUrl`), usado no lugar do favicon automático em toda a UI (sidebar, command palette).
+
+**Visual**
+- **Indicador de drop no drag-and-drop**: linha indicadora (`::before`) no ícone sobre o qual o item arrastado está passando.
+- **Cor por workspace**: `workspaceColor(id)` (hash determinístico sobre uma paleta fixa de 8 cores) — sem precisar persistir nada nem adicionar UI de escolha; o anel de "ativo" passou a usar `box-shadow` em vez de `border-color` pra não brigar com a cor de fundo do pill.
+- **Densidade de sidebar** (confortável/compacta): `sidebarDensity` persistido; `ServicesManager.layout()` calcula a largura do `BrowserView` dinamicamente a partir dela (precisa bater exatamente com a largura do CSS — `72px`/`56px` — senão o conteúdo do serviço fica desalinhado com a sidebar).
+
+**Performance**
+- **`broadcastState()` coalescido**: várias mutações de estado síncronas na mesma função (ex.: `setState` + `updateBadge`) geravam um envio de IPC por chamada; agora agenda via `queueMicrotask` e só manda o estado final uma vez por tick.
+- **Polling de memória mais leve**: intervalo de `getMemoryUsage()` subiu de 5s pra 15s no `App.tsx`.
+
+### Revisão (correções aplicadas antes do commit)
+
+Uma passada de `/code-review` (alto esforço) sobre esse diff (área de risco: ciclo de vida de janela/tray é terreno já historicamente propenso a bug nesta sessão) encontrou 5 problemas reais:
+
+1. **Menu de contexto com backdrop bloqueando cliques**: o backdrop cobrindo a tela inteira (`position: fixed; inset: 0`) ficava visualmente por cima dos ícones da sidebar, então clicar com o botão direito num ícone *diferente* enquanto outro menu estava aberto só fechava o menu atual (o clique nunca chegava no ícone de baixo) — era preciso clicar direito duas vezes. Corrigido removendo o backdrop e usando um listener de captura em `window` (`mousedown`/`contextmenu`) que só observa se o clique foi fora do menu, sem bloquear o ponteiro — agora um clique direito no ícone B enquanto o menu de A está aberto troca o menu pra B num clique só.
+2. **"Abrir Deskbox" no tray não reabria a janela quando `startMinimized` estava ativo**: se a janela tinha sido fechada de verdade (sem `minimizeToTray`) e o app ficou só no tray (por `startMinimized`), clicar em "Abrir Deskbox" recriava a janela mas o `ready-to-show` via `startMinimized: true` e pulava o `show()` — primeiro clique não fazia nada visível. Corrigido com uma flag `forceShowOnReady`, setada antes de recriar a janela por um pedido explícito de abrir.
+3. **App ficaria inacessível sem tray**: se `appIcon` não resolvesse (defensivo — não deveria acontecer nesse repo, mas seria catastrófico se acontecesse), `syncTray()` nunca criava o `Tray`, e mesmo assim `minimizeToTray`/`startMinimized` escondiam a janela sem nenhum jeito de reabrir a não ser matar o processo. Corrigido: os dois comportamentos agora checam `tray` (`&& tray` no close, `|| !tray` no ready-to-show) antes de esconder a janela.
+4. **URL de ícone manual sem normalização**: o campo de URL do site customizado auto-prefixa `https://` se faltar o protocolo, mas o campo de ícone manual não — um ícone digitado como `exemplo.com/icone.png` virava uma URL relativa à própria página do app (`file://.../icone.png`), sempre quebrada. Corrigido aplicando a mesma normalização.
+5. **Argumento `--hidden` morto**: `app.setLoginItemSettings` recebia `args: ['--hidden']` quando "iniciar com o sistema" estava ativo, mas nada no código lê `process.argv` — o argumento nunca influenciava nada (quem decide se a janela aparece no boot é só o `startMinimized` persistido). Removido por ser código morto e enganoso pra quem for ler depois.
+
 ## v2 — Controle de celular (Android) dentro do Deskbox
 
 Ideia: embutir uma tela do celular como se fosse mais um "serviço" do Deskbox, com controle de toque/teclado real, não só espelhamento passivo.
