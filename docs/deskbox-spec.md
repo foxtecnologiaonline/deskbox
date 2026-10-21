@@ -86,6 +86,17 @@ Pedido explícito de compactar o build mantendo qualidade. Números reais medido
 
 A maior parte do tamanho final (~200 MB) é o próprio binário do Chromium/Electron — não compactável sem trocar de framework, fora do escopo de uma passada de otimização.
 
+### Segunda passada (pedido explícito de "menor tamanho possível, sem perder qualidade")
+
+Antes de tocar em qualquer coisa, gerei um `.deb` real e medi `du -sh` em cada item do pacote (`release/linux-unpacked`) pra achar o que ainda sobrava de seguro cortar, em vez de chutar. Achado: o binário `deskbox` (motor do Chromium/Electron) sozinho é **178 MB** dos ~220 MB totais — isso é a base irredutível da stack escolhida. O resto, em ordem de peso: `icudtl.dat` (10 MB, dados de Unicode/ICU — precisa de um build customizado do Electron a partir do código-fonte pra reduzir, fora de escopo), `LICENSES.chromium.html` (8,8 MB), `libGLESv2.so`/`resources.pak`/`app.asar`/`libvk_swiftshader.so`/`libffmpeg.so` (todos necessários pra renderização, mídia e fallback de GPU — removê-los quebraria funcionalidade real).
+
+- **Removido `LICENSES.chromium.html` (8,8 MB) via `afterPack.js`**: é só texto de atribuição de licenças open-source do Chromium, sem nenhum efeito em runtime. O texto completo continua público em qualquer instalação do Chromium (`chrome://credits`) e em chromium.org, então remover a cópia duplicada do pacote não tira o acesso à atribuição — só o peso morto. Validado: unpacked caiu de 229 MB pra 220 MB.
+- **Por que o `.deb` final não encolheu no mesmo tanto** (ficou em ~66 MB, praticamente igual ao anterior): `LICENSES.chromium.html` é um arquivo de texto puro, que a compressão `maximum` já espremia bastante antes de remover — a economia de 8,8 MB no disco do usuário (instalado) não se traduz 1:1 no tamanho do instalador baixado, porque texto comprime muito melhor que binário. Ainda assim, vale: menos espaço ocupado depois de instalado é uma otimização real, só não é a mesma métrica do "download".
+- **`nsis.artifactName`**: agora `Deskbox-<versão>-setup.exe` (antes usava o nome padrão do electron-builder, com espaço). Também dá nome previsível pra separar os dois instaladores Windows em artefatos distintos no CI (ver abaixo).
+- **`nsis.differentialPackage: false`**: desliga a geração do `.blockmap` (usado só por atualização diferencial, que o Deskbox não tem — sem auto-update, ver "Fora do escopo"). Não afeta o tamanho do `.exe` entregue (o `.blockmap` nunca era enviado como artefato), só evita trabalho/arquivo desnecessário no `release/` local.
+- **Dois artefatos separados no CI** (`build-windows.yml`): em vez de um `.zip` só com os dois `.exe` juntos, agora o workflow sobe `Deskbox-Setup` e `Deskbox-Portable` como artefatos distintos — quem só precisa de um baixa só o que precisa, sem carregar o outro.
+- **Conclusão**: o essencial do tamanho (Chromium + V8 + Node.js + ICU) é estrutural da escolha Electron e não dá pra reduzir mais sem comprometer qualidade ou trocar de framework por completo (reescrita, fora de escopo). As otimizações seguras já aplicadas (locales, minificação, licenças, compressão máxima) esgotam o que se pode cortar sem abrir mão de funcionalidade.
+
 ## Distribuição sem instalação (ambientes corporativos restritos)
 
 Pedido do usuário: rodar em máquinas corporativas onde instalar programas é bloqueado por política.

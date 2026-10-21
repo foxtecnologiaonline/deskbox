@@ -54,7 +54,7 @@ npm run dist:linux # empacota AppImage + .deb
 
 ## Tamanho do build
 
-O empacotador corta os ~55 idiomas do Chromium que o app não usa (mantém só `en-US`/`pt-BR`) e minifica `main`/`preload` — ver detalhes e números em `docs/deskbox-spec.md` § "Otimização de tamanho do build".
+O empacotador corta os ~55 idiomas do Chromium que o app não usa (mantém só `en-US`/`pt-BR`), remove o arquivo de licenças do Chromium (texto legal sem efeito em runtime — segue público em `chrome://credits`) e minifica `main`/`preload` — ver detalhes e números em `docs/deskbox-spec.md` § "Otimização de tamanho do build". O build Windows no CI gera o instalador completo (`Deskbox-<versão>-setup.exe`) e a versão portátil (`Deskbox-<versão>-portable.exe`) como dois artefatos separados, pra quem só precisa de um não baixar o outro.
 
 ## Rodar sem instalar (Windows portable / Linux AppImage)
 

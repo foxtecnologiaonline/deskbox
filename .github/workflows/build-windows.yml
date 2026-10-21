@@ -45,8 +45,23 @@ jobs:
       # normalmente, mas o Windows SmartScreen mostra um aviso de "editor
       # não reconhecido" na primeira execução (Mais informações > Executar
       # assim mesmo). Normal para builds de teste sem assinatura.
-      - uses: actions/upload-artifact@v4
+      #
+      # Dois artefatos separados (em vez de um .zip com os dois .exe juntos),
+      # pra quem só precisa de um dos dois baixar só o que precisa.
+      # if-no-files-found: ignore porque um build com build_target=portable
+      # ou =instalador só gera um dos dois arquivos.
+      - name: Upload instalador completo
+        uses: actions/upload-artifact@v4
         with:
-          name: Deskbox-Windows-installer
-          path: release/*.exe
+          name: Deskbox-Setup
+          path: release/*-setup.exe
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload versão portátil
+        uses: actions/upload-artifact@v4
+        with:
+          name: Deskbox-Portable
+          path: release/*-portable.exe
+          if-no-files-found: ignore
           retention-days: 14
