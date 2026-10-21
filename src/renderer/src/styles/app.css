@@ -731,7 +731,7 @@ html,
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 4px;
-  min-width: 200px;
+  width: 200px;
   display: flex;
   flex-direction: column;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);

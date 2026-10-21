@@ -1,6 +1,18 @@
 import { useEffect, useRef } from 'react'
 import type { ServiceInstance } from '@shared/types'
 
+// Precisam bater com a largura/altura reais do CSS (.context-menu) — sem
+// clamping, o menu aberto perto da borda inferior da janela (sidebar com
+// muitos serviços) fica cortado por `overflow: hidden` do .app-shell e os
+// últimos botões ficam inacessíveis.
+const MENU_WIDTH = 200
+const MENU_HEIGHT = 124
+const MARGIN = 8
+
+function clamp(value: number, max: number): number {
+  return Math.max(MARGIN, Math.min(value, max))
+}
+
 interface ServiceContextMenuProps {
   service: ServiceInstance
   x: number
@@ -41,8 +53,11 @@ export default function ServiceContextMenu({
     }
   }, [onClose])
 
+  const left = clamp(x, window.innerWidth - MENU_WIDTH - MARGIN)
+  const top = clamp(y, window.innerHeight - MENU_HEIGHT - MARGIN)
+
   return (
-    <div ref={menuRef} className="context-menu" style={{ top: y, left: x }}>
+    <div ref={menuRef} className="context-menu" style={{ top, left }}>
       <button
         onClick={() => {
           onTogglePinned()

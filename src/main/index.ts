@@ -264,6 +264,16 @@ app.whenReady().then(() => {
   syncTray()
 
   app.on('activate', () => showMainWindow())
+
+  // isQuitting também precisa ficar true pra qualquer saída que não passe pelo
+  // "Sair" do tray (Cmd+Q no macOS, "Sair" do Dock, SIGTERM do SO etc.) — sem
+  // isso, o handler de 'close' interceptava até essas saídas "de verdade" e
+  // minimizava pra bandeja em vez de deixar o app encerrar, e o app.quit()
+  // nunca completava (nenhuma janela chega a fechar de fato, então
+  // window-all-closed nunca dispara).
+  app.on('before-quit', () => {
+    isQuitting = true
+  })
 })
 
 app.on('window-all-closed', () => {

@@ -38,6 +38,8 @@ export class ServicesManager {
   private currentlyShownInstanceId: string | null = null
   /** instanceIds cujo BrowserView está no meio de um carregamento (did-start-loading..did-stop-loading). */
   private loadingInstanceIds = new Set<string>()
+  /** instanceIds que já mandaram ao menos um SERVICE_UNREAD — ver handleUnreadMessage. */
+  private seenUnreadInstanceIds = new Set<string>()
   /** true enquanto um modal do renderer (overlay React) precisa ficar visível. */
   private overlayOpen = false
   /** true quando o app está trancado por senha mestre — nenhum BrowserView é exibido. */
@@ -199,55 +201,51 @@ export class ServicesManager {
     return this.getEnrichedState()
   }
 
+  /**
+   * Boilerplate comum a toda configuração simples (checar lock, mesclar no
+   * estado, notificar o renderer): `compute` só roda se o app estiver
+   * destrancado, já que não há por que calcular o patch de um `setState` que
+   * nem vai acontecer.
+   */
+  private patchState(compute: (state: DeskboxState) => Partial<DeskboxState>): RendererState {
+    if (this.locked) return this.getEnrichedState()
+    this.setState((s) => ({ ...s, ...compute(s) }))
+    this.broadcastState()
+    return this.getEnrichedState()
+  }
+
   /** `pinned: true` faz o serviço nunca hibernar sozinho, mesmo com hibernação automática ativa. */
   toggleServicePinned(instanceId: string): RendererState {
-    if (this.locked) return this.getEnrichedState()
-    this.setState((s) => ({
-      ...s,
+    return this.patchState((s) => ({
       services: s.services.map((service) =>
         service.instanceId === instanceId ? { ...service, pinned: !service.pinned } : service
       )
     }))
-    this.broadcastState()
-    return this.getEnrichedState()
   }
 
   setSidebarDensity(density: SidebarDensity): RendererState {
     if (this.locked) return this.getEnrichedState()
-    this.setState((s) => ({ ...s, sidebarDensity: density }))
+    const result = this.patchState(() => ({ sidebarDensity: density }))
     this.layout()
-    this.broadcastState()
-    return this.getEnrichedState()
+    return result
   }
 
   setNotificationsEnabled(enabled: boolean): RendererState {
-    if (this.locked) return this.getEnrichedState()
-    this.setState((s) => ({ ...s, notificationsEnabled: enabled }))
-    this.broadcastState()
-    return this.getEnrichedState()
+    return this.patchState(() => ({ notificationsEnabled: enabled }))
   }
 
   /** Persistência pura — o efeito colateral (criar/destruir o Tray) é feito pelo chamador em index.ts. */
   setMinimizeToTray(enabled: boolean): RendererState {
-    if (this.locked) return this.getEnrichedState()
-    this.setState((s) => ({ ...s, minimizeToTray: enabled }))
-    this.broadcastState()
-    return this.getEnrichedState()
+    return this.patchState(() => ({ minimizeToTray: enabled }))
   }
 
   /** Persistência pura — o efeito colateral (app.setLoginItemSettings) é feito pelo chamador em index.ts. */
   setLaunchAtLogin(enabled: boolean): RendererState {
-    if (this.locked) return this.getEnrichedState()
-    this.setState((s) => ({ ...s, launchAtLogin: enabled }))
-    this.broadcastState()
-    return this.getEnrichedState()
+    return this.patchState(() => ({ launchAtLogin: enabled }))
   }
 
   setStartMinimized(enabled: boolean): RendererState {
-    if (this.locked) return this.getEnrichedState()
-    this.setState((s) => ({ ...s, startMinimized: enabled }))
-    this.broadcastState()
-    return this.getEnrichedState()
+    return this.patchState(() => ({ startMinimized: enabled }))
   }
 
   /**
@@ -319,6 +317,7 @@ export class ServicesManager {
       for (const instanceId of [...this.views.keys()]) {
         this.destroyView(instanceId)
       }
+      this.seenUnreadInstanceIds.clear()
       // Um arquivo exportado por uma versão mais antiga do Deskbox pode não ter
       // os campos mais novos (pinned/iconUrl por serviço, densidade, notificações,
       // bandeja) — ?? cobre esse caso com os valores padrão em vez de undefined.
@@ -409,13 +408,20 @@ export class ServicesManager {
     if (!instanceId) return
     const service = this.getState().services.find((s) => s.instanceId === instanceId)
     const previousCount = service?.unreadCount ?? 0
+    // A primeira leitura de um BrowserView recém-criado (serviço adicionado agora,
+    // ou reativado depois de hibernar) só estabelece a base — nunca notifica. Sem
+    // isso, uma conta restaurada de sessão com não lidos pré-existentes (ex.:
+    // WhatsApp com 5 mensagens já não lidas antes mesmo de abrir no Deskbox) geraria
+    // uma notificação de "mensagem nova" bem na hora de adicionar a conta.
+    const isFirstReport = !this.seenUnreadInstanceIds.has(instanceId)
+    this.seenUnreadInstanceIds.add(instanceId)
     this.setState((state) => ({
       ...state,
       services: state.services.map((s) => (s.instanceId === instanceId ? { ...s, unreadCount: count } : s))
     }))
     this.updateBadge()
     this.broadcastState()
-    if (service && count > previousCount) {
+    if (service && !isFirstReport && count > previousCount) {
       this.notifyNewUnread(service)
     }
   }
@@ -542,6 +548,7 @@ export class ServicesManager {
   removeService(instanceId: string): RendererState {
     if (this.locked) return this.getEnrichedState()
     this.destroyView(instanceId)
+    this.seenUnreadInstanceIds.delete(instanceId)
     const state = this.setState((s) => {
       const removed = s.services.find((service) => service.instanceId === instanceId)
       const services = s.services.filter((service) => service.instanceId !== instanceId)
@@ -618,6 +625,7 @@ export class ServicesManager {
     }
     for (const service of current.services.filter((s) => s.workspaceId === workspaceId)) {
       this.destroyView(service.instanceId)
+      this.seenUnreadInstanceIds.delete(service.instanceId)
     }
     const state = this.setState((s) => {
       const workspaces = s.workspaces.filter((w) => w.id !== workspaceId)
