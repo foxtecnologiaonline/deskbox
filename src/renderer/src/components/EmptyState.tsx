@@ -1,7 +1,7 @@
 import type { CatalogEntry } from '@shared/types'
 import { faviconUrl } from '@shared/favicon'
 
-const QUICK_ADD_IDS = ['whatsapp', 'gmail', 'slack', 'telegram', 'discord', 'notion']
+const QUICK_ADD_IDS = ['whatsapp', 'gmail', 'slack', 'telegram', 'claude', 'notion']
 
 interface EmptyStateProps {
   catalog: CatalogEntry[]

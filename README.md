@@ -26,7 +26,7 @@ npm run dist:linux # empacota AppImage + .deb
 
 ## Funcionalidades
 
-- Catálogo com ~20 serviços populares (WhatsApp, Telegram, Slack, Discord, Gmail, Outlook, Teams, Notion, Trello, etc.) + opção de adicionar qualquer site customizado.
+- Catálogo com ~29 serviços populares (WhatsApp, Telegram, Slack, Discord, Gmail, Outlook, Teams, Notion, Trello, Claude, ChatGPT, Gemini, GitHub, Figma, etc.) + opção de adicionar qualquer site customizado.
 - Sidebar com ícones dos serviços adicionados, reordenável por arrastar-e-soltar.
 - Sessão isolada por serviço/instância — dá para adicionar o mesmo serviço mais de uma vez (ex.: duas contas de Gmail).
 - Badge de não lidos por serviço (detectado a partir do título da aba) agregado no ícone do app.
