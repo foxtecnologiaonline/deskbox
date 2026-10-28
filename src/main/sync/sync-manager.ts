@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, watch, write
 import { join } from 'path'
 import type { DeskboxState, SyncResult, SyncSettings, SyncView } from '@shared/types'
 import type { Store } from '../store'
-import { decodeEnvelope, encodeEnvelope, type SyncEnvelope } from './codec'
+import { decodeEnvelope, encodeEnvelope, peekEnvelope, type SyncEnvelope } from './codec'
 import { toSyncPayload, type SyncPayload } from './payload'
 
 const FILE_NAME = 'deskbox-sync.json'
@@ -13,7 +13,7 @@ const POLL_INTERVAL_MS = 60 * 1000
 // Carimbo de um arquivo mais de 1 dia no futuro = relógio errado (ou arquivo hostil): não vence o last-writer-wins.
 const MAX_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000
 
-type RemoteError = 'corrupt' | 'needs-passphrase' | 'bad-passphrase' | 'unsupported' | 'bad-clock'
+type RemoteError = 'corrupt' | 'needs-passphrase' | 'bad-passphrase' | 'unsupported' | 'bad-clock' | 'downgrade'
 
 export interface SyncHost {
   isLocked(): boolean
@@ -43,6 +43,8 @@ export class SyncManager {
   private lastSyncAt: number | null = null
   private error: string | null = null
   private encrypted = false
+  /** A senha em memória já abriu (ou cifrou) o arquivo desta sessão — só então o atalho "nada mudou" vale. */
+  private passphraseVerified = false
   private pushTimer: NodeJS.Timeout | null = null
   private pollTimer: NodeJS.Timeout | null = null
   private watcher: FSWatcher | null = null
@@ -75,7 +77,7 @@ export class SyncManager {
     const settings = this.store.getState().sync
     if (!settings) return
     this.passphrase = this.readStoredPassphrase(settings)
-    this.encrypted = settings.passphraseEnc !== null
+    this.encrypted = settings.encrypted ?? settings.passphraseEnc !== null
     this.activate()
   }
 
@@ -157,7 +159,7 @@ export class SyncManager {
   }
 
   private async readRemote(): Promise<
-    { kind: 'none' } | { kind: 'ok'; envelope: SyncEnvelope } | { kind: 'error'; error: RemoteError }
+    { kind: 'none' } | { kind: 'unchanged' } | { kind: 'ok'; envelope: SyncEnvelope } | { kind: 'error'; error: RemoteError }
   > {
     const file = this.filePath()
     if (!file || !existsSync(file)) return { kind: 'none' }
@@ -167,15 +169,27 @@ export class SyncManager {
     } catch {
       return { kind: 'error', error: 'corrupt' }
     }
+    const head = peekEnvelope(text)
+    // Sem mudança (mesmo carimbo do local — o caso comum do polling e do eco da nossa própria gravação):
+    // nada a puxar nem a empurrar, então não vale gastar scrypt + AES só pra descobrir isso.
+    if (head && head.updatedAt === this.store.getState().configUpdatedAt && head.encrypted === this.encrypted && (!this.encrypted || this.passphraseVerified)) {
+      return { kind: 'unchanged' }
+    }
     const result = await decodeEnvelope(text, this.passphrase)
     if (!result.ok) return { kind: 'error', error: result.error }
     if (result.envelope.updatedAt > Date.now() + MAX_CLOCK_SKEW_MS) return { kind: 'error', error: 'bad-clock' }
+    // Quem tem escrita na pasta compartilhada poderia trocar o arquivo cifrado por um em texto puro (sem
+    // autenticação) com carimbo mais novo — o GCM só protege se a gente exigir que ele esteja lá.
+    if (this.encrypted && !result.envelope.encrypted) return { kind: 'error', error: 'downgrade' }
+    if (result.envelope.encrypted) this.passphraseVerified = true
     return { kind: 'ok', envelope: result.envelope }
   }
 
   private async writeRemote(state: DeskboxState): Promise<void> {
     const file = this.filePath()
     if (!file) return
+    // Exige criptografia mas a senha não está em memória (ex.: reabriu sem cofre do SO): nunca rebaixa pra texto puro.
+    if (this.encrypted && !this.passphrase) throw new Error('Senha de sincronização necessária — informe-a para continuar.')
     const text = await encodeEnvelope(toSyncPayload(state), state.configUpdatedAt, this.deviceId, this.passphrase)
     // Escrita atômica: o cliente de nuvem nunca vê um arquivo pela metade.
     const tmp = `${file}.${process.pid}.tmp`
@@ -191,6 +205,13 @@ export class SyncManager {
       throw error
     }
     this.encrypted = this.passphrase !== null
+    this.passphraseVerified = this.passphrase !== null
+  }
+
+  private setEncrypted(encrypted: boolean): void {
+    this.encrypted = encrypted
+    const settings = this.store.getState().sync
+    if (settings && settings.encrypted !== encrypted) this.store.setState((s) => ({ ...s, sync: s.sync ? { ...s.sync, encrypted } : s.sync }))
   }
 
   private errorMessage(code: RemoteError): string {
@@ -201,6 +222,8 @@ export class SyncManager {
         return 'O arquivo de sincronização está criptografado — informe a senha de sincronização.'
       case 'bad-passphrase':
         return 'Senha de sincronização incorreta (ou arquivo adulterado).'
+      case 'downgrade':
+        return 'O arquivo de sincronização está sem criptografia, mas este dispositivo exige — pode ter sido adulterado. Reative a sincronização aqui se a mudança foi proposital.'
       case 'unsupported':
         return 'O arquivo de sincronização é de uma versão mais nova do Deskbox. Atualize este dispositivo.'
       default:
@@ -252,9 +275,11 @@ export class SyncManager {
         this.setStatus(remote.error === 'needs-passphrase' ? 'needs-passphrase' : 'error', this.errorMessage(remote.error))
         return
       }
-      if (remote.kind === 'ok' && remote.envelope.updatedAt > local.configUpdatedAt) {
+      if (remote.kind === 'unchanged') {
+        // nada a fazer
+      } else if (remote.kind === 'ok' && remote.envelope.updatedAt > local.configUpdatedAt) {
         this.host.applyRemote(remote.envelope.payload, remote.envelope.updatedAt)
-        this.encrypted = remote.envelope.encrypted
+        this.setEncrypted(remote.envelope.encrypted)
       } else if (remote.kind === 'none' || local.configUpdatedAt > (remote.kind === 'ok' ? remote.envelope.updatedAt : 0)) {
         await this.writeRemote(local)
       }
@@ -278,11 +303,14 @@ export class SyncManager {
     const pass = passphrase?.trim() ? passphrase : null
     const previousSettings = this.store.getState().sync
     const previousPassphrase = this.passphrase
+    const previousVerified = this.passphraseVerified
     this.deactivate()
     this.passphrase = pass
+    this.passphraseVerified = false
 
     const failBack = (error: string): EnableResult => {
       this.passphrase = previousPassphrase
+      this.passphraseVerified = previousVerified
       if (previousSettings) this.activate()
       return { ok: false, error }
     }
@@ -294,7 +322,10 @@ export class SyncManager {
         const decoded = await decodeEnvelope(readFileSync(file, 'utf-8'), pass)
         if (!decoded.ok) remote = { kind: 'error', error: decoded.error }
         else if (decoded.envelope.updatedAt > Date.now() + MAX_CLOCK_SKEW_MS) remote = { kind: 'error', error: 'bad-clock' }
-        else remote = { kind: 'ok', envelope: decoded.envelope }
+        else {
+          remote = { kind: 'ok', envelope: decoded.envelope }
+          if (decoded.envelope.encrypted) this.passphraseVerified = true
+        }
       } catch {
         remote = { kind: 'error', error: 'corrupt' }
       }
@@ -316,6 +347,7 @@ export class SyncManager {
           workspaces: remote.envelope.payload.workspaces.length
         }
         this.passphrase = previousPassphrase
+        this.passphraseVerified = previousVerified
         if (previousSettings) this.activate()
         return { ok: false, error: 'conflict', conflict }
       }
@@ -326,7 +358,7 @@ export class SyncManager {
     if (pass && safeStorage.isEncryptionAvailable()) {
       passphraseEnc = safeStorage.encryptString(pass).toString('base64')
     }
-    this.store.setState((s) => ({ ...s, sync: { folder, passphraseEnc } }))
+    this.store.setState((s) => ({ ...s, sync: { folder, passphraseEnc, encrypted: pass !== null } }))
     this.encrypted = pass !== null
 
     try {
@@ -348,25 +380,39 @@ export class SyncManager {
     return { ok: true }
   }
 
-  /** Informa a senha de sincronização quando o app não conseguiu recuperá-la (ex.: sem cofre do SO). */
+  /**
+   * Informa a senha de sincronização quando o app não conseguiu recuperá-la (ex.: sem cofre do SO).
+   * Só é guardada se o arquivo abrir com ela — uma senha errada não substitui a que já estava salva.
+   */
   async providePassphrase(passphrase: string): Promise<SyncResult> {
     const settings = this.store.getState().sync
     if (!settings) return { ok: false, error: 'Sincronização não está ativa.' }
     if (this.host.isLocked()) return { ok: false, error: 'Destrave o app antes.' }
+    const previous = this.passphrase
+    const previousVerified = this.passphraseVerified
     this.passphrase = passphrase || null
-    this.encrypted = this.passphrase !== null
+    this.passphraseVerified = false
+    await this.syncNow()
+    if (this.status !== 'idle') {
+      const error = this.error ?? 'Falha ao sincronizar.'
+      this.passphrase = previous
+      this.passphraseVerified = previousVerified
+      return { ok: false, error }
+    }
+    const encrypted = this.passphrase !== null
     const passphraseEnc =
       this.passphrase && safeStorage.isEncryptionAvailable()
         ? safeStorage.encryptString(this.passphrase).toString('base64')
         : null
-    this.store.setState((s) => ({ ...s, sync: { ...settings, passphraseEnc } }))
-    await this.syncNow()
-    return this.status === 'idle' ? { ok: true } : { ok: false, error: this.error ?? 'Falha ao sincronizar.' }
+    this.encrypted = encrypted
+    this.store.setState((s) => ({ ...s, sync: { ...(s.sync ?? settings), passphraseEnc, encrypted } }))
+    return { ok: true }
   }
 
   disable(): void {
     this.deactivate()
     this.passphrase = null
+    this.passphraseVerified = false
     this.encrypted = false
     this.lastSyncAt = null
     this.status = 'idle'

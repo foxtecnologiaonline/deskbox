@@ -108,6 +108,7 @@ export default function SettingsModal({
       setNewPassphrase('')
       showToast('Sincronização retomada.')
     }
+    // Em caso de falha, o motivo já aparece acima: o main atualiza `sync.error` (senha incorreta etc.).
   }
 
   async function handleDisableSync(): Promise<void> {

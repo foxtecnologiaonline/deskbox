@@ -58,6 +58,18 @@ export async function encodeEnvelope(
   )
 }
 
+/** Lê só o cabeçalho (sem KDF/decifrar): permite pular o trabalho caro quando nada mudou. */
+export function peekEnvelope(text: string): { updatedAt: number; deviceId: string; encrypted: boolean } | null {
+  try {
+    const raw = JSON.parse(text)
+    if (!raw || raw.format !== FORMAT || raw.version !== VERSION) return null
+    if (typeof raw.updatedAt !== 'number' || typeof raw.deviceId !== 'string') return null
+    return { updatedAt: raw.updatedAt, deviceId: raw.deviceId, encrypted: raw.encrypted === true }
+  } catch {
+    return null
+  }
+}
+
 export async function decodeEnvelope(text: string, passphrase: string | null): Promise<DecodeResult> {
   let raw: Record<string, unknown>
   try {

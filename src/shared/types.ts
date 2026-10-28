@@ -82,6 +82,12 @@ export interface SyncSettings {
   folder: string
   /** Senha de criptografia do arquivo de sync, cifrada com o cofre do SO (safeStorage); base64. */
   passphraseEnc: string | null
+  /**
+   * Este dispositivo exige o arquivo de sync criptografado. Fica salvo à parte da senha porque, sem cofre do
+   * SO (`passphraseEnc` nulo), a senha não persiste — e mesmo assim um arquivo em texto puro não pode ser aceito.
+   * Ausente em configs antigas: vale `passphraseEnc !== null`.
+   */
+  encrypted?: boolean
 }
 
 /** Visão do sync enviada ao renderer (sem a senha). */

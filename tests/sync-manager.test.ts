@@ -1,12 +1,13 @@
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { __setUserData } from 'electron'
 import { Store } from '../src/main/store'
 import { SyncManager, type SyncHost } from '../src/main/sync/sync-manager'
-import { applyPayload } from '../src/main/sync/payload'
+import { applyPayload, toSyncPayload } from '../src/main/sync/payload'
+import { encodeEnvelope } from '../src/main/sync/codec'
 import type { ServiceInstance } from '../src/shared/types'
 
 const root = mkdtempSync(join(tmpdir(), 'deskbox-sync-'))
@@ -155,7 +156,7 @@ test('reinício: sem a senha em memória o status vira needs-passphrase; provide
   // "reinicia" o app B: novo SyncManager sobre a mesma config, mas sem cofre (passphraseEnc nulo)
   const b = device('b6')
   await b.sync.enable(folder, 'pw-6')
-  b.store.setState((s) => ({ ...s, sync: { folder, passphraseEnc: null } }))
+  b.store.setState((s) => ({ ...s, sync: { folder, passphraseEnc: null, encrypted: true } }))
   const reborn = new SyncManager(b.store, b.host)
   cleanups.push(() => reborn.dispose())
   reborn.start()
@@ -252,4 +253,43 @@ test('edição local depois de receber carimbo adiantado (< 1 dia) ainda vence: 
   assert.equal(b.store.getState().services[0].name, 'V3-editado-em-B')
   await a.sync.syncNow()
   assert.equal(a.store.getState().services[0].name, 'V3-editado-em-B')
+})
+
+test('rebaixamento: arquivo em texto puro e mais novo NÃO substitui a config de quem exige criptografia', async () => {
+  const folder = mkdtempSync(join(root, 'f9-'))
+  const a = device('a9')
+  addService(a, 'x1', 'Original')
+  assert.deepEqual(await a.sync.enable(folder, 'pw-9'), { ok: true })
+
+  // quem tem escrita na pasta troca o arquivo cifrado por um sem criptografia, com carimbo mais novo
+  const hostile = { ...a.store.getState(), services: [svc('evil', 'Phishing')] }
+  const stamp = a.store.getState().configUpdatedAt + 1000
+  writeFileSync(join(folder, 'deskbox-sync.json'), await encodeEnvelope(toSyncPayload(hostile), stamp, 'atacante', null), 'utf-8')
+
+  await a.sync.syncNow()
+  assert.equal(a.store.getState().services[0].name, 'Original')
+  assert.equal(a.sync.getView()?.status, 'error')
+  assert.match(a.sync.getView()?.error ?? '', /sem criptografia/)
+  // e o arquivo hostil também não é "corrigido" por cima silenciosamente com a config local rebaixada
+  assert.equal(a.sync.getView()?.encrypted, true)
+})
+
+test('senha informada errada não substitui a que já estava guardada', async () => {
+  const folder = mkdtempSync(join(root, 'f10-'))
+  const a = device('a10')
+  addService(a, 'x1', 'Agenda')
+  await a.sync.enable(folder, 'pw-10')
+  const saved = a.store.getState().sync?.passphraseEnc
+  assert.ok(saved)
+
+  const wrong = await a.sync.providePassphrase('errada')
+  assert.equal(wrong.ok, false)
+  assert.equal(a.store.getState().sync?.passphraseEnc, saved, 'senha errada não pode ser persistida')
+  // depois do erro a senha boa continua valendo no próximo ciclo
+  a.store.setState((s) => ({ ...s, services: s.services.map((x) => ({ ...x, name: 'Agenda 2' })) }))
+  await a.sync.syncNow()
+  assert.equal(a.sync.getView()?.status, 'idle')
+  const b = device('b10')
+  assert.deepEqual(await b.sync.enable(folder, 'pw-10'), { ok: true })
+  assert.equal(b.store.getState().services[0].name, 'Agenda 2')
 })

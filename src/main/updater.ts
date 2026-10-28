@@ -5,6 +5,8 @@ import type { UpdateStatus } from '@shared/types'
 const FIRST_CHECK_DELAY_MS = 15 * 1000
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
 const RELEASES_URL = 'https://github.com/foxtecnologiaonline/deskbox/releases'
+// A versão vem do latest.yml baixado da internet: só entra na URL se for semver puro.
+const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
 
 /**
  * Auto-update via electron-updater + GitHub Releases (ver .github/workflows/release.yml).
@@ -34,7 +36,7 @@ export class Updater {
         state: this.portable ? 'available' : 'downloading',
         version: info.version,
         progress: 0,
-        releaseUrl: `${RELEASES_URL}/tag/v${info.version}`
+        releaseUrl: SEMVER.test(info.version) ? `${RELEASES_URL}/tag/v${info.version}` : RELEASES_URL
       })
     })
     autoUpdater.on('update-not-available', () => this.set({ state: 'not-available', version: undefined }))

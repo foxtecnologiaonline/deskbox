@@ -7,7 +7,7 @@
    ```bash
    git tag v0.2.0 && git push origin v0.2.0
    ```
-3. O workflow **Release** (`.github/workflows/release.yml`) roda nos 3 sistemas, confere tag × versão, roda os testes (`npm test`), compila e **publica no GitHub Releases** (instaladores + `latest.yml`/`latest-mac.yml`/`latest-linux.yml`).
+3. O workflow **Release** (`.github/workflows/release.yml`) primeiro confere tag × versão e roda os testes (`npm test`) num job `verify` — se falhar, **nada é compilado nem publicado**; depois compila nos 3 sistemas e **publica no GitHub Releases** (instaladores + `latest.yml`/`latest-mac.yml`/`latest-linux.yml`).
 4. Quem já tem o Deskbox instalado recebe a atualização sozinho (ver abaixo).
 
 Rodar o workflow **Release** manualmente (botão "Run workflow") faz um **ensaio**: compila tudo e sobe como artefatos, sem publicar nada.

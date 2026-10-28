@@ -11,6 +11,7 @@
 //   Notarização (opcional):        APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
 // Sem nenhuma dessas variáveis o build sai SEM assinatura (funciona, mas SmartScreen/Gatekeeper avisam).
 import { spawnSync } from 'child_process'
+import { createRequire } from 'module'
 
 const argv = process.argv.slice(2)
 const dryRun = argv.includes('--dry-run')
@@ -59,6 +60,19 @@ if (isMac) {
 for (const name of ['CSC_LINK', 'CSC_KEY_PASSWORD', 'WIN_CSC_LINK', 'WIN_CSC_KEY_PASSWORD']) {
   if (env[name] !== undefined && !env[name].trim()) delete env[name]
 }
+// Cada plataforma só enxerga o próprio certificado: o electron-builder usa CSC_LINK como reserva quando
+// WIN_CSC_LINK não existe, e o certificado Developer ID do macOS (CSC_LINK) tentaria assinar o .exe.
+if (isMac) {
+  delete env.WIN_CSC_LINK
+  delete env.WIN_CSC_KEY_PASSWORD
+} else {
+  delete env.CSC_LINK
+  delete env.CSC_KEY_PASSWORD
+  if (!isWin) {
+    delete env.WIN_CSC_LINK
+    delete env.WIN_CSC_KEY_PASSWORD
+  }
+}
 
 // Windows: instalador e portátil em execuções SEPARADAS do electron-builder. Na mesma execução o portátil
 // reaproveita o arquivo compactado do instalador — que, por causa do auto-update diferencial (blockmap), é
@@ -74,13 +88,16 @@ function splitWindowsTargets(list) {
   return effective.map((target) => [...list.slice(0, i + 1), target, ...list.slice(j)])
 }
 
-const runs = splitWindowsTargets(passthrough).map((list) => ['electron-builder', ...list, ...extra])
+const runs = splitWindowsTargets(passthrough).map((list) => [...list, ...extra])
 for (const note of notes) console.log(`[ci-build] ${note}`)
 for (const args of runs) {
-  console.log(`[ci-build] npx ${args.map((a) => (a.includes('=') ? a.split('=')[0] + '=…' : a)).join(' ')}`)
+  console.log(`[ci-build] electron-builder ${args.map((a) => (a.includes('=') ? a.split('=')[0] + '=…' : a)).join(' ')}`)
 }
 if (dryRun) process.exit(0)
+// Chama o CLI do electron-builder direto com o node (sem npx/cmd.exe): no Windows um shell reparte
+// argumentos com espaço (ex.: AZURE_TS_PUBLISHER="Minha Empresa Ltda") e a assinatura quebraria.
+const cli = createRequire(import.meta.url).resolve('electron-builder/cli.js')
 for (const args of runs) {
-  const result = spawnSync('npx', args, { stdio: 'inherit', shell: process.platform === 'win32', env })
+  const result = spawnSync(process.execPath, [cli, ...args], { stdio: 'inherit', env })
   if (result.status !== 0) process.exit(result.status ?? 1)
 }

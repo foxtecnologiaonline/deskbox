@@ -26,8 +26,19 @@ const SIDEBAR_WIDTH_COMFORTABLE = 72
 const SIDEBAR_WIDTH_COMPACT = 56
 const HIBERNATION_SWEEP_INTERVAL_MS = 60 * 1000
 
+// getEnrichedState roda a cada broadcast (não lidos, loading, hibernação...): o hash de um script de até
+// 200 KB não pode ser recalculado a cada vez. A chave é o próprio texto (a string é a mesma referência
+// enquanto o código não muda, então o lookup é barato); o cache é podado quando cresce.
+const jsHashCache = new Map<string, string>()
+const JS_HASH_CACHE_MAX = 64
+
 function hashJs(code: string): string {
-  return createHash('sha256').update(code, 'utf-8').digest('hex')
+  const cached = jsHashCache.get(code)
+  if (cached) return cached
+  const hash = createHash('sha256').update(code, 'utf-8').digest('hex')
+  if (jsHashCache.size >= JS_HASH_CACHE_MAX) jsHashCache.clear()
+  jsHashCache.set(code, hash)
+  return hash
 }
 
 /** JS personalizado só executa se este dispositivo aprovou exatamente este código (ver ServiceInstance.approvedJsHash). */
@@ -65,6 +76,7 @@ export class ServicesManager {
   private cssKeys = new Map<string, string>()
   private syncViewProvider: () => SyncView | null = () => null
   private unlockListeners = new Set<() => void>()
+  private pendingPairedPhones = new Map<string, string>()
   private phone: PhoneServer | null = null
 
   constructor(
@@ -84,13 +96,19 @@ export class ServicesManager {
 
   /** Eventos do servidor de celular: ao parear, o celular vira um serviço na sidebar (uma vez por aparelho). */
   handlePhoneEvent(event: PhoneEvent): void {
-    if (event.type === 'paired' && !this.locked) {
-      const url = phoneServiceUrl(event.deviceId)
-      const exists = this.getState().services.some((s) => s.url === url)
-      if (!exists) this.addPhoneService(event.deviceId, event.name)
+    if (event.type === 'paired') {
+      // Trancado: o token já foi salvo pelo servidor, então o serviço (única forma de revogar o aparelho)
+      // é criado ao destravar — senão o celular ficaria pareado sem nenhuma entrada na sidebar.
+      if (this.locked) this.pendingPairedPhones.set(event.deviceId, event.name)
+      else this.ensurePhoneService(event.deviceId, event.name)
     }
     // Trancado: nada (nem o nome do aparelho) vai pro renderer.
     if (!this.locked && !this.window.isDestroyed()) this.window.webContents.send(IPC.PHONE_CHANGED, event)
+  }
+
+  private ensurePhoneService(deviceId: string, name: string): void {
+    const url = phoneServiceUrl(deviceId)
+    if (!this.getState().services.some((s) => s.url === url)) this.addPhoneService(deviceId, name)
   }
 
   private addPhoneService(deviceId: string, name: string): void {
@@ -194,6 +212,10 @@ export class ServicesManager {
     const hash = this.getState().passwordHash
     if (!hash || (await verifyPassword(password, hash))) {
       this.locked = false
+      for (const [deviceId, name] of this.pendingPairedPhones) {
+        if (this.phone?.isPaired(deviceId)) this.ensurePhoneService(deviceId, name)
+      }
+      this.pendingPairedPhones.clear()
       this.reattachActiveViewIfAllowed()
       this.broadcastState()
       this.unlockListeners.forEach((listener) => listener())

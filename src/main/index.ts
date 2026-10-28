@@ -260,7 +260,17 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.OPEN_RELEASES, () => {
     const url = updater!.getStatus().releaseUrl ?? 'https://github.com/foxtecnologiaonline/deskbox/releases'
     // Só abre páginas de release do próprio repositório — o renderer não escolhe a URL.
-    if (url.startsWith('https://github.com/foxtecnologiaonline/deskbox/releases')) void shell.openExternal(url)
+    try {
+      const parsed = new URL(url)
+      const path = parsed.pathname.replace(/\/+$/, '')
+      const ok =
+        parsed.origin === 'https://github.com' &&
+        (path === '/foxtecnologiaonline/deskbox/releases' ||
+          /^\/foxtecnologiaonline\/deskbox\/releases\/tag\/v[0-9A-Za-z.-]+$/.test(path))
+      if (ok) void shell.openExternal(parsed.href)
+    } catch {
+      // URL inválida: ignora.
+    }
   })
   ipcMain.handle(IPC.CHOOSE_SYNC_FOLDER, async (): Promise<string | null> => {
     if (manager!.isLocked()) return null
