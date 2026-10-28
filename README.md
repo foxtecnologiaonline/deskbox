@@ -56,7 +56,7 @@ npm run dist:linux # empacota AppImage + .deb
 - **CSS, JavaScript e proxy por serviço** (clique direito no ícone → Configurar): injeta CSS/JS a cada carregamento e roteia só aquele serviço por um proxy próprio (`direct://` ignora o global). JS que vem de outro dispositivo/arquivo importado **só roda depois que você revisa e salva** neste computador.
 - **Sincronização entre dispositivos** por uma pasta que você já sincroniza (Dropbox, OneDrive, Google Drive, Syncthing…): serviços, workspaces, tema e CSS/JS iguais em todos os computadores, com criptografia opcional (AES-256-GCM + scrypt). Sem conta e sem servidor. Logins e proxies **não** sincronizam.
 - **Auto-update** (instalador Windows e AppImage Linux; o portátil só avisa) via GitHub Releases — ver [`docs/release.md`](docs/release.md).
-- **Controle de celular Android** dentro de um serviço do Deskbox: espelha a tela do celular e deixa tocar, arrastar e digitar, tudo na rede local (WebRTC). Veja [`android/README.md`](android/README.md) e [`docs/phone-protocol.md`](docs/phone-protocol.md).
+- **Controle de celular Android** dentro de um serviço do Deskbox: espelha a tela do celular e deixa tocar, arrastar e digitar (direto no teclado do computador), tudo na rede local (WebRTC). Precisa do app **Deskbox Celular** no Android. Dois jeitos de conectar: pelo QR (o celular conecta no computador) ou **"Conectar pelo celular"** (o computador conecta no celular — funciona no Deskbox portátil sem administrador e com firewall bloqueando conexões de entrada). Veja [`android/README.md`](android/README.md) e [`docs/phone-protocol.md`](docs/phone-protocol.md).
 
 ## Tamanho do build
 

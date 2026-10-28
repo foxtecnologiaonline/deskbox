@@ -14,6 +14,11 @@ object ShareStatus {
     var message: String = "Parado"
         private set
 
+    /** Endereço/código para o Deskbox conectar no celular (conexão reversa); nulo quando não está escutando. */
+    @Volatile
+    var link: LinkServer.Info? = null
+        private set
+
     @Volatile
     var listener: (() -> Unit)? = null
 
@@ -22,6 +27,11 @@ object ShareStatus {
     fun update(running: Boolean, message: String) {
         this.running = running
         this.message = message
+        main.post { listener?.invoke() }
+    }
+
+    fun updateLink(info: LinkServer.Info?) {
+        link = info
         main.post { listener?.invoke() }
     }
 }

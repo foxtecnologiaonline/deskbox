@@ -66,6 +66,8 @@ class DeskboxAccessibilityService : AccessibilityService() {
 
     private fun key(name: String) {
         val action = when (name) {
+            "enter" -> return enter()
+            "backspace" -> return backspace()
             "back" -> GLOBAL_ACTION_BACK
             "home" -> GLOBAL_ACTION_HOME
             "recents" -> GLOBAL_ACTION_RECENTS
@@ -76,51 +78,94 @@ class DeskboxAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Insere [text] na posição do cursor (ou no lugar da seleção) do campo com foco de entrada via
-     * ACTION_SET_TEXT e reposiciona o cursor depois do texto inserido. Nunca mexe em campo de senha.
+     * Roda [block] com o campo de texto que tem o foco de entrada (e libera os nós depois). Campo de senha só
+     * quando [allowPassword]: o texto exposto ao serviço é mascarado, então reescrevê-lo corromperia o campo —
+     * mas apertar Enter nele (enviar o login) é seguro.
      */
     @Suppress("DEPRECATION")
-    private fun typeText(text: String) {
-        if (text.isEmpty()) return
+    private fun withFocusedInput(allowPassword: Boolean = false, block: (AccessibilityNodeInfo) -> Unit) {
         var root: AccessibilityNodeInfo? = null
         var input: AccessibilityNodeInfo? = null
         try {
             root = rootInActiveWindow ?: return
             input = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
-            // Senha: o texto exposto ao serviço é mascarado — reescrevê-lo corromperia o campo (e não vamos digitar nele).
-            if (input.isPassword || !input.isEditable) return
-
-            val current = if (input.isShowingHintText) "" else input.text?.toString().orEmpty()
-            var start = input.textSelectionStart
-            var end = input.textSelectionEnd
-            if (start < 0 || end < 0 || start > current.length || end > current.length) {
-                start = current.length
-                end = current.length
-            }
-            if (start > end) {
-                val swap = start
-                start = end
-                end = swap
-            }
-
-            val updated = current.substring(0, start) + text + current.substring(end)
-            val setTextArgs = Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, updated)
-            }
-            if (!input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, setTextArgs)) return
-
-            val cursor = start + text.length
-            val selectionArgs = Bundle().apply {
-                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
-                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
-            }
-            input.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selectionArgs)
+            if (!input.isEditable || (input.isPassword && !allowPassword)) return
+            block(input)
         } finally {
             // recycle() é obrigatório antes do API 33 e inofensivo depois.
             if (Build.VERSION.SDK_INT < 33) {
                 input?.recycle()
                 root?.recycle()
             }
+        }
+    }
+
+    private fun currentText(input: AccessibilityNodeInfo): String =
+        if (input.isShowingHintText) "" else input.text?.toString().orEmpty()
+
+    /** Seleção atual (start <= end) ou o fim do texto quando o campo não informa o cursor. */
+    private fun selection(input: AccessibilityNodeInfo, current: String): Pair<Int, Int> {
+        var start = input.textSelectionStart
+        var end = input.textSelectionEnd
+        if (start < 0 || end < 0 || start > current.length || end > current.length) {
+            start = current.length
+            end = current.length
+        }
+        return if (start <= end) start to end else end to start
+    }
+
+    /** Troca [start, end) por [insert] via ACTION_SET_TEXT e põe o cursor logo depois do que entrou. */
+    private fun replaceRange(input: AccessibilityNodeInfo, current: String, start: Int, end: Int, insert: String) {
+        val updated = current.substring(0, start) + insert + current.substring(end)
+        val setTextArgs = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, updated)
+        }
+        if (!input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, setTextArgs)) return
+        val cursor = start + insert.length
+        val selectionArgs = Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
+        }
+        input.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selectionArgs)
+    }
+
+    /** Insere [text] na posição do cursor (ou no lugar da seleção) do campo com foco. Nunca em campo de senha. */
+    private fun typeText(text: String) {
+        if (text.isEmpty()) return
+        withFocusedInput { input ->
+            val current = currentText(input)
+            val (start, end) = selection(input, current)
+            replaceRange(input, current, start, end, text)
+        }
+    }
+
+    /** Apaga a seleção, ou o caractere antes do cursor (inteiro, mesmo emoji/par substituto). */
+    private fun backspace() {
+        withFocusedInput { input ->
+            val current = currentText(input)
+            val (start, end) = selection(input, current)
+            when {
+                start != end -> replaceRange(input, current, start, end, "")
+                start > 0 -> replaceRange(input, current, current.offsetByCodePoints(start, -1), start, "")
+            }
+        }
+    }
+
+    /**
+     * Enter: a ação do teclado do campo (enviar mensagem, buscar, próximo...) — API 30+. Sem ela (ou se o campo
+     * não aceitar), quebra a linha.
+     */
+    private fun enter() {
+        withFocusedInput(allowPassword = true) { input ->
+            if (Build.VERSION.SDK_INT >= 30 &&
+                input.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+            ) {
+                return@withFocusedInput
+            }
+            if (input.isPassword) return@withFocusedInput
+            val current = currentText(input)
+            val (start, end) = selection(input, current)
+            replaceRange(input, current, start, end, "\n")
         }
     }
 

@@ -118,3 +118,59 @@ jobs:
             release/latest*.yml
           if-no-files-found: warn
           retention-days: 7
+
+  # App Android do controle de celular. Vai como asset fixo "Deskbox-Phone.apk" em cada release, então
+  # /releases/latest/download/Deskbox-Phone.apk (o QR de download do Deskbox) sempre aponta pra mais nova.
+  android:
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      DESKBOX_VERSION_CODE: ${{ github.run_number }}
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Compilar APK
+        shell: bash
+        run: |
+          chmod +x gradlew
+          export DESKBOX_VERSION="$(node -p "require('../package.json').version")"
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/deskbox.jks"
+            export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/deskbox.jks"
+            ./gradlew assembleRelease --no-daemon --stacktrace
+            cp app/build/outputs/apk/release/app-release.apk ../Deskbox-Phone.apk
+          else
+            echo "::warning::Sem ANDROID_KEYSTORE_BASE64: APK de debug — atualizar o app no celular vai exigir desinstalar a versão anterior."
+            ./gradlew assembleDebug --no-daemon --stacktrace
+            cp app/build/outputs/apk/debug/app-debug.apk ../Deskbox-Phone.apk
+          fi
+
+      - name: Anexar ao release
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" Deskbox-Phone.apk --clobber
+
+      - name: Subir artefato do ensaio
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Deskbox-Phone-APK
+          path: Deskbox-Phone.apk
+          if-no-files-found: error
+          retention-days: 7

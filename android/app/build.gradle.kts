@@ -11,8 +11,9 @@ android {
         applicationId = "app.deskbox.phone"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        // No workflow Release vêm da tag (vX.Y.Z) e do número da execução — o Android exige versionCode crescente.
+        versionCode = System.getenv("DESKBOX_VERSION_CODE")?.toIntOrNull() ?: 1
+        versionName = System.getenv("DESKBOX_VERSION") ?: "0.1.0"
 
         // libwebrtc traz libs nativas por ABI (~15 MB cada). x86 (32 bits) não é alvo real.
         ndk {
@@ -20,9 +21,24 @@ android {
         }
     }
 
+    // Chave própria (segredo ANDROID_KEYSTORE_BASE64 no CI): mesma assinatura em todas as versões, então o
+    // Android aceita instalar a nova por cima. Sem ela o CI gera APK de debug (cada build com outra chave).
+    signingConfigs {
+        val keystore = System.getenv("ANDROID_KEYSTORE_FILE")
+        if (!keystore.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

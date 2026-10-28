@@ -19,17 +19,27 @@ import androidx.core.content.IntentCompat
 import org.json.JSONObject
 
 /**
- * Serviço em primeiro plano (type mediaProjection) que mantém a captura de tela e a conexão de sinalização
- * com o Deskbox enquanto o compartilhamento estiver ativo.
+ * Serviço em primeiro plano (type mediaProjection) que mantém a captura de tela e a sinalização com o
+ * Deskbox enquanto o compartilhamento estiver ativo. Dois caminhos ao mesmo tempo:
+ * - **direto** ([SignalingClient]): o celular conecta no computador (IP do QR) — só se houver IP;
+ * - **reverso** ([LinkServer]): o computador conecta no celular — sempre; resolve o firewall do Windows
+ *   bloqueando conexões de entrada (Deskbox portátil sem admin, rede Pública).
+ * O que abrir a visualização (`start`) é o canal daquela sessão de vídeo.
  */
-class ScreenShareService : Service(), SignalingClient.Listener {
+class ScreenShareService : Service() {
 
     private lateinit var prefs: Prefs
     private val main = Handler(Looper.getMainLooper())
 
     private var engine: RtcEngine? = null
     private var signaling: SignalingClient? = null
+    private var link: LinkServer? = null
     private var peer: PeerSession? = null
+    private var peerChannel: SignalChannel? = null
+    private var directConnected = false
+    private var linkConnected = false
+    private var directError: String? = null
+    private var directTarget: String? = null
     private var peerGeneration = 0
     private var displayListener: DisplayManager.DisplayListener? = null
     private var lastDisplay: Triple<Int, Int, Int>? = null
@@ -84,15 +94,16 @@ class ScreenShareService : Service(), SignalingClient.Listener {
 
     private fun startSharing(intent: Intent) {
         val projectionData = IntentCompat.getParcelableExtra(intent, EXTRA_RESULT_DATA, Intent::class.java)
-        val host = intent.getStringExtra(EXTRA_HOST).orEmpty().trim()
+        val hosts = intent.getStringExtra(EXTRA_HOST).orEmpty()
+            .split(',', ' ', ';').map { it.trim() }.filter { it.isNotEmpty() }
         val port = intent.getIntExtra(EXTRA_PORT, Prefs.DEFAULT_PORT)
         val code = intent.getStringExtra(EXTRA_CODE)
-        if (projectionData == null || host.isBlank()) {
+        if (projectionData == null) {
             abort("Dados de captura ausentes")
             return
         }
-        // Nem inicia a captura de tela se o destino não for da rede local.
-        if (!HostPolicy.isLocalHost(host)) {
+        // Nem inicia a captura de tela se algum destino não for da rede local.
+        if (hosts.any { !HostPolicy.isLocalHost(it) }) {
             abort(HostPolicy.MESSAGE)
             return
         }
@@ -106,8 +117,21 @@ class ScreenShareService : Service(), SignalingClient.Listener {
 
         lastDisplay = currentDisplay()
         registerDisplayListener()
-        setStatus("Conectando a $host:$port…")
-        signaling = SignalingClient(prefs, this).also { it.connect(host, port, code) }
+
+        // Reverso: sempre (é o que funciona quando o firewall do computador barra o modo direto).
+        val server = LinkServer(prefs, listenerFor(direct = false)) { info -> ShareStatus.updateLink(info) }
+        if (server.start()) {
+            link = server
+        } else if (hosts.isEmpty()) {
+            abort("Não foi possível abrir a porta para o computador conectar")
+            return
+        }
+
+        if (hosts.isNotEmpty()) {
+            directTarget = hosts.first()
+            signaling = SignalingClient(prefs, listenerFor(direct = true)).also { it.connect(hosts, port, code) }
+        }
+        refreshStatus()
     }
 
     private fun abort(message: String) {
@@ -115,65 +139,103 @@ class ScreenShareService : Service(), SignalingClient.Listener {
         shutdown()
     }
 
-    // --- SignalingClient.Listener (sempre na thread principal) ---
+    // --- Sinalização (callbacks sempre na thread principal) ---
 
-    override fun onConnected() {
-        setStatus("Conectado ao Deskbox")
-    }
+    private fun listenerFor(direct: Boolean) = object : SignalingClient.Listener {
+        private fun channel(): SignalChannel? = if (direct) signaling else link
 
-    override fun onMessage(type: String, message: JSONObject) {
-        when (type) {
-            "paired" -> setStatus("Pareado — aguardando visualização no Deskbox")
-            "ready" -> if (peer == null) setStatus("Conectado — aguardando visualização no Deskbox")
-            "start" -> startPeer()
-            "answer" -> peer?.onRemoteAnswer(message.optString("sdp"))
-            "ice" -> message.optJSONObject("candidate")?.let { peer?.onRemoteIce(it) }
-            "stop" -> stopPeer()
+        override fun onConnected() {
+            if (direct) {
+                directConnected = true
+                directError = null
+            } else {
+                linkConnected = true
+            }
+            refreshStatus()
         }
-    }
 
-    override fun onDisconnected(willRetry: Boolean) {
-        stopPeer(announce = false)
-        setStatus("Reconectando ao Deskbox…")
-    }
-
-    override fun onFatalError(reason: String) {
-        val text = when (reason) {
-            "bad_code" -> "Código inválido. Gere um novo código no Deskbox."
-            "expired" -> "Código expirado. Gere um novo código no Deskbox."
-            "bad_token" -> "Pareamento perdido. Pareie de novo com um código."
-            "rate_limited" -> "Muitas tentativas. Aguarde alguns minutos."
-            "bad_host" -> HostPolicy.MESSAGE
-            "bad_request" -> "Pedido inválido: confira o endereço, a porta e o código."
-            else -> "Erro de conexão com o Deskbox ($reason)"
+        override fun onMessage(type: String, message: JSONObject) {
+            val from = channel() ?: return
+            when (type) {
+                "paired", "ready" -> refreshStatus()
+                "start" -> startPeer(from)
+                "answer" -> if (from === peerChannel) peer?.onRemoteAnswer(message.optString("sdp"))
+                "ice" -> if (from === peerChannel) message.optJSONObject("candidate")?.let { peer?.onRemoteIce(it) }
+                "stop" -> if (from === peerChannel) stopPeer()
+            }
         }
-        ShareStatus.update(false, text)
-        shutdown()
+
+        override fun onDisconnected(willRetry: Boolean) {
+            if (direct) directConnected = false else linkConnected = false
+            if (channel() === peerChannel) stopPeer(announce = false)
+            refreshStatus()
+        }
+
+        override fun onFatalError(reason: String) {
+            if (!direct) return
+            val text = when (reason) {
+                "bad_code" -> "Código inválido. Gere um novo código no Deskbox."
+                "expired" -> "Código expirado. Gere um novo código no Deskbox."
+                "bad_token" -> "Pareamento perdido. Pareie de novo com um código."
+                "rate_limited" -> "Muitas tentativas. Aguarde alguns minutos."
+                "bad_host" -> HostPolicy.MESSAGE
+                "bad_request" -> "Pedido inválido: confira o endereço, a porta e o código."
+                else -> "Erro de conexão com o Deskbox ($reason)"
+            }
+            if (signaling === peerChannel) stopPeer(announce = false)
+            signaling?.close()
+            signaling = null
+            directConnected = false
+            if (link == null) {
+                ShareStatus.update(false, text)
+                shutdown()
+            } else {
+                // O caminho reverso continua aberto: o computador ainda pode conectar pelo endereço do celular.
+                directError = text
+                refreshStatus()
+            }
+        }
     }
 
     // --- Sessões de visualização ---
 
-    private fun startPeer() {
+    private fun startPeer(channel: SignalChannel) {
         val currentEngine = engine ?: return
         stopPeer(announce = false)
         val generation = ++peerGeneration
         val session = PeerSession(
             context = this,
             engine = currentEngine,
-            sendSignal = { signaling?.send(it) },
+            sendSignal = { channel.send(it) },
             // Ignora o aviso de uma sessão antiga que cai depois de já existir uma nova.
             onClosed = { main.post { if (generation == peerGeneration) stopPeer() } }
         )
         peer = session
+        peerChannel = channel
         session.start()
-        setStatus("Transmitindo para o Deskbox")
+        refreshStatus()
     }
 
     private fun stopPeer(announce: Boolean = true) {
         val session = peer ?: return
         peer = null
+        peerChannel = null
         session.close()
-        if (announce) setStatus("Conectado — aguardando visualização no Deskbox")
+        if (announce) refreshStatus()
+    }
+
+    private fun refreshStatus() {
+        if (shuttingDown) return
+        val text = when {
+            peer != null -> "Transmitindo para o Deskbox"
+            directConnected || linkConnected -> "Conectado ao Deskbox — aguardando visualização"
+            else -> buildString {
+                directError?.let { append(it).append(' ') }
+                if (signaling != null) append("Procurando o Deskbox em ${directTarget.orEmpty()}…")
+                else append("Aguardando o Deskbox conectar…")
+            }
+        }
+        setStatus(text)
     }
 
     // --- Rotação da tela ---
@@ -222,8 +284,12 @@ class ScreenShareService : Service(), SignalingClient.Listener {
         displayListener = null
         signaling?.close()
         signaling = null
+        link?.close()
+        link = null
+        ShareStatus.updateLink(null)
         peer?.close()
         peer = null
+        peerChannel = null
         engine?.dispose()
         engine = null
         if (ShareStatus.running) ShareStatus.update(false, "Parado")

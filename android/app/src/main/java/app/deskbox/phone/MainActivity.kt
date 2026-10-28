@@ -12,8 +12,10 @@ import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
 import android.widget.EditText
+import android.view.View
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -28,6 +30,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var inputCode: EditText
     private lateinit var buttonStartStop: Button
     private lateinit var textStatus: TextView
+    private lateinit var textLink: TextView
     private lateinit var textA11y: TextView
 
     private val a11yListener: (Boolean) -> Unit = { runOnUiThread { renderA11y() } }
@@ -59,6 +62,7 @@ class MainActivity : AppCompatActivity() {
         inputCode = findViewById(R.id.inputCode)
         buttonStartStop = findViewById(R.id.buttonStartStop)
         textStatus = findViewById(R.id.textStatus)
+        textLink = findViewById(R.id.textLink)
         textA11y = findViewById(R.id.textA11y)
 
         inputHost.setText(prefs.host)
@@ -76,6 +80,19 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.buttonA11y).setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
+        // Android 13+: app instalado por APK (fora da Play Store) tem a acessibilidade bloqueada como
+        // "configuração restrita" até o usuário liberar em Informações do app → ⋮ → Permitir configurações restritas.
+        val restricted = Build.VERSION.SDK_INT >= 33
+        findViewById<View>(R.id.restrictedHelp).visibility = if (restricted) View.VISIBLE else View.GONE
+        findViewById<Button>(R.id.buttonAppInfo).apply {
+            visibility = if (restricted) View.VISIBLE else View.GONE
+            setOnClickListener {
+                startActivity(
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+                )
+            }
+        }
+        findViewById<Button>(R.id.buttonForget).setOnClickListener { confirmForget() }
         buttonStartStop.setOnClickListener { onStartStopClicked() }
 
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -104,6 +121,35 @@ class MainActivity : AppCompatActivity() {
         textStatus.text = ShareStatus.message
         buttonStartStop.text =
             if (ShareStatus.running) "Parar compartilhamento" else "Iniciar compartilhamento"
+        val link = ShareStatus.link
+        textLink.visibility = if (ShareStatus.running && link != null) View.VISIBLE else View.GONE
+        if (link != null) {
+            val addresses = link.addresses.take(2).joinToString("  ou  ") { "$it:${link.port}" }
+                .ifEmpty { "(sem Wi-Fi — conecte a uma rede)" }
+            textLink.text = buildString {
+                append("Conectar pelo computador (se o Deskbox não achar o celular sozinho):\n")
+                append("No Deskbox → Adicionar serviço → Celular Android → Conectar pelo celular\n\n")
+                append("Endereço:  ").append(addresses).append('\n')
+                if (link.code != null) append("Código:  ").append(link.code)
+                else append("Código bloqueado por excesso de tentativas — pare e inicie de novo.")
+                if (link.linked) append("\n\nEste celular já está pareado com um computador: ele reconecta sozinho.")
+            }
+        }
+    }
+
+    private fun confirmForget() {
+        AlertDialog.Builder(this)
+            .setTitle("Esquecer computadores pareados?")
+            .setMessage("O Deskbox vai precisar de um código novo para conectar neste celular de novo.")
+            .setPositiveButton("Esquecer") { _, _ ->
+                if (ShareStatus.running) {
+                    startService(Intent(this, ScreenShareService::class.java).setAction(ScreenShareService.ACTION_STOP))
+                }
+                prefs.forgetPairings()
+                Toast.makeText(this, "Pareamentos apagados", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun renderA11y() {
@@ -119,30 +165,40 @@ class MainActivity : AppCompatActivity() {
             startService(Intent(this, ScreenShareService::class.java).setAction(ScreenShareService.ACTION_STOP))
             return
         }
-        val host = inputHost.text.toString().trim()
+        // Vazio = só o caminho reverso (o computador conecta no celular pelo endereço/código mostrados aqui).
+        val hosts = parseHosts(inputHost.text.toString())
         val port = inputPort.text.toString().trim().toIntOrNull()
         val code = inputCode.text.toString().trim()
-        if (host.isEmpty() || port == null || port !in 1..65535) {
-            Toast.makeText(this, "Informe o IP e a porta do computador", Toast.LENGTH_SHORT).show()
-            return
+        if (hosts.isNotEmpty()) {
+            if (port == null || port !in 1..65535) {
+                Toast.makeText(this, "Porta inválida", Toast.LENGTH_SHORT).show()
+                return
+            }
+            if (code.isEmpty() && prefs.token.isNullOrEmpty()) {
+                Toast.makeText(
+                    this,
+                    "Informe o código do Deskbox — ou apague o IP para o computador conectar no celular",
+                    Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+            // Antes de pedir a captura de tela e antes de qualquer código/token sair do aparelho: só rede local.
+            if (hosts.any { !HostPolicy.isLocalHost(it) }) {
+                Toast.makeText(this, HostPolicy.MESSAGE, Toast.LENGTH_LONG).show()
+                return
+            }
+            prefs.port = port
         }
-        if (code.isEmpty() && prefs.token.isNullOrEmpty()) {
-            Toast.makeText(this, "Informe o código de 6 dígitos mostrado no Deskbox", Toast.LENGTH_SHORT).show()
-            return
-        }
-        // Antes de pedir a captura de tela e antes de qualquer código/token sair do aparelho: só rede local.
-        if (!HostPolicy.isLocalHost(host)) {
-            Toast.makeText(this, HostPolicy.MESSAGE, Toast.LENGTH_LONG).show()
-            return
-        }
-        prefs.host = host
-        prefs.port = port
+        prefs.host = hosts.joinToString(", ")
         // O token antigo NÃO é apagado aqui: se a captura for negada ou o código estiver errado, o pareamento
-        // anterior continua valendo. Ele só é substituído quando o servidor responde `paired`.
+        // anterior continua valendo. Ele só é substituído quando o Deskbox responde `paired`.
 
         val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projectionLauncher.launch(manager.createScreenCaptureIntent())
     }
+
+    private fun parseHosts(text: String): List<String> =
+        text.split(',', ' ', ';').map { it.trim() }.filter { it.isNotEmpty() }.distinct()
 
     private fun startShare(projectionData: Intent) {
         val intent = Intent(this, ScreenShareService::class.java)
@@ -166,7 +222,9 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, HostPolicy.MESSAGE, Toast.LENGTH_LONG).show()
             return
         }
-        inputHost.setText(host)
+        // `alt`: outros endereços do computador (cabo + Wi-Fi, VPN...). O app tenta um por um até conectar.
+        val alternates = parseHosts(uri.getQueryParameter("alt").orEmpty()).filter { HostPolicy.isLocalHost(it) }
+        inputHost.setText((listOf(host) + alternates).distinct().joinToString(", "))
         uri.getQueryParameter("port")?.let { inputPort.setText(it) }
         uri.getQueryParameter("code")?.let { inputCode.setText(it) }
         Toast.makeText(this, "QR lido — toque em Iniciar compartilhamento", Toast.LENGTH_SHORT).show()

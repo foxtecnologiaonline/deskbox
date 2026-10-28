@@ -1,6 +1,5 @@
 package app.deskbox.phone
 
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import okhttp3.OkHttpClient
@@ -13,8 +12,9 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.min
 
 /**
- * Cliente WebSocket de sinalização (docs/phone-protocol.md). Reconecta com backoff (1 s → 30 s)
+ * Cliente WebSocket de sinalização do modo direto (docs/phone-protocol.md). Reconecta com backoff (1 s → 30 s)
  * usando o token pareado. Todos os callbacks de [Listener] são entregues na thread principal.
+ * Aceita vários endereços do computador (o QR traz alternativos): enquanto não conecta, tenta o próximo.
  *
  * Só conecta em hosts de rede local ([HostPolicy]); o `hello` leva APENAS o `code` quando há código
  * (1º pareamento) e só o `token` nas reconexões — o token antigo é substituído somente quando chega `paired`.
@@ -22,7 +22,7 @@ import kotlin.math.min
 class SignalingClient(
     private val prefs: Prefs,
     private val listener: Listener
-) {
+) : SignalChannel {
     interface Listener {
         fun onConnected()
         fun onMessage(type: String, message: JSONObject)
@@ -44,7 +44,14 @@ class SignalingClient(
     private var socket: WebSocket? = null
 
     @Volatile
-    private var host = ""
+    private var hosts: List<String> = emptyList()
+
+    @Volatile
+    private var hostIndex = 0
+
+    /** Algum socket já abriu com o endereço atual (então falha depois disso não é motivo para trocar de endereço). */
+    @Volatile
+    private var openedOnce = false
 
     @Volatile
     private var port = Prefs.DEFAULT_PORT
@@ -64,13 +71,15 @@ class SignalingClient(
 
     private val retryRunnable = Runnable { if (!closedByUser) open() }
 
-    fun connect(host: String, port: Int, code: String?) {
-        this.host = host.trim()
+    fun connect(hosts: List<String>, port: Int, code: String?) {
+        this.hosts = hosts.map { it.trim() }.filter { it.isNotEmpty() }
+        this.hostIndex = 0
+        this.openedOnce = false
         this.port = port
         this.code = code?.trim()?.takeIf { it.isNotEmpty() }
         attempt = 0
-        // Antes de abrir o socket e antes de enviar code/token: só rede local.
-        if (!HostPolicy.isLocalHost(this.host)) {
+        // Antes de abrir o socket e antes de enviar code/token: só rede local (todos os endereços).
+        if (this.hosts.isEmpty() || this.hosts.any { !HostPolicy.isLocalHost(it) }) {
             closedByUser = true
             main.post { listener.onFatalError("bad_host") }
             return
@@ -84,9 +93,9 @@ class SignalingClient(
         open()
     }
 
-    fun send(message: JSONObject): Boolean = socket?.send(message.toString()) ?: false
+    override fun send(message: JSONObject): Boolean = socket?.send(message.toString()) ?: false
 
-    fun close() {
+    override fun close() {
         closedByUser = true
         generation++
         main.removeCallbacks(retryRunnable)
@@ -101,6 +110,7 @@ class SignalingClient(
         // Incrementa ANTES de cancelar o socket antigo: o onFailure dele chega com a geração velha e é ignorado.
         val gen = ++generation
         socket?.cancel()
+        val host = hosts[hostIndex % hosts.size]
         val hostPart = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
         val request = try {
             Request.Builder().url("ws://$hostPart:$port/signal").build()
@@ -113,7 +123,12 @@ class SignalingClient(
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (gen != generation) return
                 attempt = 0
-                webSocket.send(buildHello().toString())
+                if (!openedOnce && hosts.size > 1) {
+                    // Guarda o endereço que funcionou na frente, pra próxima vez começar por ele.
+                    prefs.host = (listOf(host) + hosts.filter { it != host }).joinToString(", ")
+                }
+                openedOnce = true
+                webSocket.send(PhoneHello.build(prefs, code).toString())
                 main.post { if (gen == generation) listener.onConnected() }
             }
 
@@ -132,25 +147,11 @@ class SignalingClient(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                // Nunca conectou neste endereço: o próximo da lista talvez seja o certo (Wi-Fi × cabo × VPN).
+                if (!openedOnce && gen == generation && hosts.size > 1) hostIndex++
                 scheduleRetry(gen)
             }
         })
-    }
-
-    private fun buildHello(): JSONObject {
-        val hello = JSONObject()
-            .put("type", "hello")
-            .put("role", "phone")
-            .put("deviceId", prefs.deviceId)
-            .put("deviceName", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
-        val pendingCode = code
-        if (pendingCode != null) {
-            // 1º pareamento: só o código. O token antigo (se existir) fica intocado até chegar `paired`.
-            hello.put("code", pendingCode)
-        } else {
-            prefs.token?.takeIf { it.isNotEmpty() }?.let { hello.put("token", it) }
-        }
-        return hello
     }
 
     private fun handleMessage(gen: Int, json: JSONObject) {
@@ -183,8 +184,10 @@ class SignalingClient(
 
     private fun scheduleRetry(gen: Int) {
         if (gen != generation || closedByUser) return
-        val delay = min(30_000L, 1_000L shl min(attempt, 5))
-        attempt++
+        // Primeira volta pela lista de endereços: rápido. Depois, backoff normal.
+        val cyclingHosts = !openedOnce && hostIndex % hosts.size != 0
+        val delay = if (cyclingHosts) 300L else min(30_000L, 1_000L shl min(attempt, 5))
+        if (!cyclingHosts) attempt++
         main.post {
             if (gen != generation || closedByUser) return@post
             listener.onDisconnected(true)

@@ -32,10 +32,12 @@ jobs:
           ./gradlew assembleDebug --no-daemon --stacktrace
 
       # APK de debug: assinado automaticamente com a chave de debug do Android, serve para instalar
-      # manualmente ("fontes desconhecidas"). Para distribuir de verdade seria preciso um keystore de release.
+      # manualmente ("fontes desconhecidas"). O workflow Release gera o APK assinado com a chave própria.
+      - run: cp app/build/outputs/apk/debug/app-debug.apk ../Deskbox-Phone.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: Deskbox-Phone-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: Deskbox-Phone.apk
           if-no-files-found: error
           retention-days: 14
