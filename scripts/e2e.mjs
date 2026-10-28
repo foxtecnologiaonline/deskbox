@@ -49,14 +49,20 @@ class Cdp {
       this.ws.on('open', res)
       this.ws.on('error', rej)
     })
+    this.listeners = new Map()
     this.ws.on('message', (d) => {
       const m = JSON.parse(d.toString())
+      if (m.method) this.listeners.get(m.method)?.forEach((fn) => fn(m.params))
       if (m.id && this.pending.has(m.id)) {
         const { resolve: ok, reject } = this.pending.get(m.id)
         this.pending.delete(m.id)
         m.error ? reject(new Error(m.error.message)) : ok(m.result)
       }
     })
+  }
+  on(method, fn) {
+    if (!this.listeners.has(method)) this.listeners.set(method, [])
+    this.listeners.get(method).push(fn)
   }
   async send(method, params = {}) {
     await this.ready
@@ -127,7 +133,14 @@ let appErr = ''
 app.stderr.on('data', (d) => (appErr += d))
 
 let main
-const sleepClose = []
+let viewerRef = null
+const viewerLog = []
+async function diagnose() {
+  console.log('--- diagnóstico ---')
+  try { console.log('sim:', JSON.stringify(await main.eval('({ state: window.__sim && window.__sim.state, log: window.__sim && window.__sim.log, received: window.__sim && window.__sim.received })'))) } catch (e) { console.log('sim indisponível:', e.message) }
+  try { console.log('viewer status:', JSON.stringify(await viewerRef.eval(`document.getElementById('status').textContent`))) } catch (e) { console.log('viewer indisponível:', e.message) }
+  console.log('viewer console:', JSON.stringify(viewerLog.slice(-20)))
+}
 try {
   const mainTarget = await waitFor(() => findTarget((t) => t.url.includes('renderer/index.html')), 'janela principal', 30000)
   main = new Cdp(mainTarget.webSocketDebuggerUrl)
@@ -178,11 +191,16 @@ try {
   const viewerT = await waitFor(() => findTarget((t) => /^http:\/\/127\.0\.0\.1:\d+\/viewer\//.test(t.url)), 'viewer do celular no BrowserView')
   const viewerPort = new URL(viewerT.url).port
   const viewer = new Cdp(viewerT.webSocketDebuggerUrl)
+  viewerRef = viewer
+  await viewer.send('Runtime.enable')
+  viewer.on('Runtime.consoleAPICalled', (p) => viewerLog.push(`${p.type}: ${(p.args || []).map((a) => a.value ?? a.description).join(' ')}`))
+  viewer.on('Runtime.exceptionThrown', (p) => viewerLog.push(`EXC: ${p.exceptionDetails?.exception?.description || p.exceptionDetails?.text}`))
   check('viewer do celular carregou no BrowserView', true)
   check('viewer mostra "celular offline" antes de conectar', await waitFor(async () => /offline/i.test(await viewer.eval(`document.getElementById('status').textContent`)), 'status offline').then(() => true))
 
   const SIM = `(async () => {
-    window.__sim = { received: [], state: 'init' };
+    window.__sim = { received: [], state: 'init', log: [] };
+    window.addEventListener('unhandledrejection', (e) => window.__sim.log.push('unhandled: ' + (e.reason && e.reason.message || e.reason)));
     const ws = new WebSocket('ws://127.0.0.1:${viewerPort}/signal');
     window.__sim.ws = ws;
     let pc = null;
@@ -191,8 +209,12 @@ try {
     setInterval(() => { ctx.fillStyle = 'hsl(' + ((n++ * 7) % 360) + ',70%,50%)'; ctx.fillRect(0, 0, 360, 640); }, 33);
     const send = (o) => ws.send(JSON.stringify(o));
     ws.onopen = () => send({ type: 'hello', role: 'phone', deviceId: '${DEVICE}', deviceName: 'Pixel (sim)', token: '${TOKEN}' });
+    ws.onerror = () => window.__sim.log.push('ws error');
+    ws.onclose = (e) => window.__sim.log.push('ws close ' + e.code);
     ws.onmessage = async (e) => {
       const m = JSON.parse(e.data);
+      window.__sim.log.push('recv ' + m.type);
+      try {
       if (m.type === 'ready') window.__sim.state = 'ready';
       else if (m.type === 'start') {
         if (pc) pc.close();
@@ -209,11 +231,17 @@ try {
       else if (m.type === 'answer') { await pc.setRemoteDescription({ type: 'answer', sdp: m.sdp }); window.__sim.state = 'answered'; }
       else if (m.type === 'ice' && pc) { try { await pc.addIceCandidate(m.candidate); } catch (e) {} }
       else if (m.type === 'stop') { if (pc) pc.close(); pc = null; window.__sim.state = 'stopped'; }
+      } catch (err) { window.__sim.log.push('handler error on ' + m.type + ': ' + err.message); }
     };
     return 'started';
   })()`
   await main.eval(SIM)
-  await waitFor(async () => (await main.eval('window.__sim.state')) === 'answered', 'celular simulado recebeu a resposta (answer) do viewer', 20000)
+  try {
+    await waitFor(async () => (await main.eval('window.__sim.state')) === 'answered', 'celular simulado recebeu a resposta (answer) do viewer', 20000)
+  } catch (e) {
+    await diagnose()
+    throw e
+  }
   check('sinalização completa: viewer respondeu a oferta do celular', true)
   await waitFor(async () => (await viewer.eval(`document.getElementById('v').videoWidth`)) > 0, 'vídeo do celular chegando no viewer (WebRTC)', 25000)
   check('vídeo WebRTC do celular simulado renderizado no viewer', true)
