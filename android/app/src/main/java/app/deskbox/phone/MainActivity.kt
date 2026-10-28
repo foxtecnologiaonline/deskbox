@@ -130,10 +130,15 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Informe o código de 6 dígitos mostrado no Deskbox", Toast.LENGTH_SHORT).show()
             return
         }
+        // Antes de pedir a captura de tela e antes de qualquer código/token sair do aparelho: só rede local.
+        if (!HostPolicy.isLocalHost(host)) {
+            Toast.makeText(this, HostPolicy.MESSAGE, Toast.LENGTH_LONG).show()
+            return
+        }
         prefs.host = host
         prefs.port = port
-        // Um código novo significa pareamento novo: descarta o token antigo.
-        if (code.isNotEmpty()) prefs.token = null
+        // O token antigo NÃO é apagado aqui: se a captura for negada ou o código estiver errado, o pareamento
+        // anterior continua valendo. Ele só é substituído quando o servidor responde `paired`.
 
         val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projectionLauncher.launch(manager.createScreenCaptureIntent())
@@ -155,6 +160,10 @@ class MainActivity : AppCompatActivity() {
         val host = uri.getQueryParameter("host")
         if (uri.scheme != "deskbox" || uri.host != "pair" || host.isNullOrEmpty()) {
             Toast.makeText(this, "QR inválido (não é do Deskbox)", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!HostPolicy.isLocalHost(host)) {
+            Toast.makeText(this, HostPolicy.MESSAGE, Toast.LENGTH_LONG).show()
             return
         }
         inputHost.setText(host)

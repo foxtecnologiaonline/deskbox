@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A sinalização com o Deskbox é ws:// dentro da rede local (ver docs/phone-protocol.md). -->
+<!--
+  A sinalização com o Deskbox é ws:// (sem TLS) dentro da rede local — ver docs/phone-protocol.md.
+  O cleartext NÃO dá para restringir aqui: <domain-config> casa por nome de domínio e não aceita faixas de
+  IP (10/8, 192.168/16...), então escopá-lo a "rede local" não é viável neste arquivo. Por isso o base-config
+  permite cleartext e a restrição é feita em código: HostPolicy só deixa conectar em host de rede local
+  (IPv4 privado, link-local, loopback, nome .local) e o DNS do OkHttp só aceita endereços resolvidos locais.
+  TLS com fingerprint fixo no QR está previsto para a v2.
+-->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

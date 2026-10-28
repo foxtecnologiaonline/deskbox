@@ -2,6 +2,8 @@
 
 App que compartilha a tela do celular com o **Deskbox** (no computador) e, se você permitir, deixa o Deskbox tocar, deslizar e digitar nele. Funciona só na **rede local** (celular e computador no mesmo Wi-Fi). Protocolo completo em [`docs/phone-protocol.md`](../docs/phone-protocol.md).
 
+> ⚠️ **Use apenas em redes confiáveis.** A sinalização com o Deskbox é `ws://` (sem TLS): o código de pareamento e o token trafegam em texto claro dentro do Wi-Fi. Por isso o app só conecta em endereços de rede local (IP privado `10.x`, `172.16–31.x`, `192.168.x`, link-local `169.254.x`, loopback ou nome `.local`) e recusa qualquer outro host. Não pareie em Wi-Fi público ou compartilhado com estranhos; o vídeo e os comandos de controle (WebRTC) são criptografados.
+
 ## Instalar
 
 1. Baixe o artefato **Deskbox-Phone-APK** do workflow *Build Android APK* (GitHub → Actions) e extraia o `app-debug.apk`.
