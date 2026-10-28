@@ -15,9 +15,18 @@ android {
         versionCode = System.getenv("DESKBOX_VERSION_CODE")?.toIntOrNull() ?: 1
         versionName = System.getenv("DESKBOX_VERSION") ?: "0.1.0"
 
-        // libwebrtc traz libs nativas por ABI (~15 MB cada). x86 (32 bits) não é alvo real.
+        // libwebrtc traz libs nativas por ABI (~15 MB cada). Só ARM: é o que os celulares usam (64 bits nos atuais,
+        // 32 bits nos antigos/baratos). x86/x86_64 é emulador — fora do APK de produção.
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+
+    // .so comprimidas dentro do APK: o download (APK avulso, fora da Play Store) cai quase pela metade; o Android
+    // extrai na instalação. Sem isso as libs vão sem compressão (otimização que só compensa na Play Store).
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 
