@@ -7,13 +7,15 @@ interface AddServiceModalProps {
   onClose: () => void
   onAddFromCatalog: (catalogId: string) => void
   onAddCustom: (name: string, url: string, iconUrl?: string) => void
+  onAddPhone: () => void
 }
 
 export default function AddServiceModal({
   catalog,
   onClose,
   onAddFromCatalog,
-  onAddCustom
+  onAddCustom,
+  onAddPhone
 }: AddServiceModalProps): JSX.Element {
   const [query, setQuery] = useState('')
   const [customMode, setCustomMode] = useState(false)
@@ -67,6 +69,9 @@ export default function AddServiceModal({
               ))}
               {filtered.length === 0 && <p className="catalog-empty">Nenhum serviço encontrado.</p>}
             </div>
+            <button className="link-button" onClick={onAddPhone}>
+              📱 Controlar um celular Android…
+            </button>
             <button className="link-button" onClick={() => setCustomMode(true)}>
               + Adicionar site personalizado
             </button>

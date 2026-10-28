@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { BrowserView, BrowserWindow, ipcMain, session, app, Notification } from 'electron'
 import { join } from 'path'
 import type {
@@ -6,19 +6,34 @@ import type {
   DeskboxState,
   ExportedConfig,
   ImportConfigResult,
+  PhoneEvent,
   ProxyConfig,
   RendererState,
   ServiceInstance,
+  ServiceSettingsPayload,
   SetPasswordResult,
-  SidebarDensity
+  SidebarDensity,
+  SyncView
 } from '@shared/types'
 import { IPC } from '@shared/ipc'
+import { PHONE_CATALOG_ID, PHONE_ICON, phoneDeviceIdFromUrl, phoneServiceUrl } from '@shared/phone'
 import { CATALOG, findCatalogEntry } from './catalog'
 import { hashPassword, verifyPassword } from './password'
+import type { PhoneServer } from './phone/phone-server'
+import { applyPayload, isHttpUrl, MAX_CUSTOM_CODE_LENGTH, parseSyncPayload, type SyncPayload } from './sync/payload'
 
 const SIDEBAR_WIDTH_COMFORTABLE = 72
 const SIDEBAR_WIDTH_COMPACT = 56
 const HIBERNATION_SWEEP_INTERVAL_MS = 60 * 1000
+
+function hashJs(code: string): string {
+  return createHash('sha256').update(code, 'utf-8').digest('hex')
+}
+
+/** JS personalizado só executa se este dispositivo aprovou exatamente este código (ver ServiceInstance.approvedJsHash). */
+function isJsApproved(service: ServiceInstance): boolean {
+  return !service.customJs.trim() || service.approvedJsHash === hashJs(service.customJs)
+}
 
 function domainFromUrl(url: string): string {
   try {
@@ -46,15 +61,66 @@ export class ServicesManager {
   private locked = false
   /** Coalesce múltiplas chamadas síncronas de broadcastState() num único envio de IPC. */
   private broadcastScheduled = false
+  /** Chave do CSS injetado por instância (pra remover/trocar sem recarregar a página). */
+  private cssKeys = new Map<string, string>()
+  private syncViewProvider: () => SyncView | null = () => null
+  private unlockListeners = new Set<() => void>()
+  private phone: PhoneServer | null = null
 
   constructor(
     window: BrowserWindow,
     getState: () => DeskboxState,
-    setState: (updater: (state: DeskboxState) => DeskboxState) => DeskboxState
+    setState: (updater: (state: DeskboxState) => DeskboxState) => DeskboxState,
+    private replaceState: (next: DeskboxState, remoteUpdatedAt: number) => DeskboxState
   ) {
     this.window = window
     this.getState = getState
     this.setState = setState
+  }
+
+  attachPhoneServer(phone: PhoneServer): void {
+    this.phone = phone
+  }
+
+  /** Eventos do servidor de celular: ao parear, o celular vira um serviço na sidebar (uma vez por aparelho). */
+  handlePhoneEvent(event: PhoneEvent): void {
+    if (event.type === 'paired' && !this.locked) {
+      const url = phoneServiceUrl(event.deviceId)
+      const exists = this.getState().services.some((s) => s.url === url)
+      if (!exists) this.addPhoneService(event.deviceId, event.name)
+    }
+    // Trancado: nada (nem o nome do aparelho) vai pro renderer.
+    if (!this.locked && !this.window.isDestroyed()) this.window.webContents.send(IPC.PHONE_CHANGED, event)
+  }
+
+  private addPhoneService(deviceId: string, name: string): void {
+    const instance = this.buildInstance({
+      catalogId: PHONE_CATALOG_ID,
+      name: name || 'Celular Android',
+      url: phoneServiceUrl(deviceId),
+      domain: '127.0.0.1',
+      iconUrl: PHONE_ICON
+    })
+    this.setState((s) => ({ ...s, services: [...s.services, instance], activeInstanceId: instance.instanceId }))
+    this.showInstance(instance.instanceId)
+    this.broadcastState()
+  }
+
+  isLocked(): boolean {
+    return this.locked
+  }
+
+  setSyncViewProvider(provider: () => SyncView | null): void {
+    this.syncViewProvider = provider
+  }
+
+  onUnlocked(listener: () => void): void {
+    this.unlockListeners.add(listener)
+  }
+
+  /** Reenvia o estado ao renderer (ex.: status do sync mudou). */
+  refreshState(): void {
+    this.broadcastState()
   }
 
   /** Configuração única, válida para a vida inteira do app (um só Store/ServicesManager). */
@@ -130,6 +196,7 @@ export class ServicesManager {
       this.locked = false
       this.reattachActiveViewIfAllowed()
       this.broadcastState()
+      this.unlockListeners.forEach((listener) => listener())
       return true
     }
     return false
@@ -172,17 +239,23 @@ export class ServicesManager {
     if (this.locked) return this.getEnrichedState()
     this.setState((s) => ({ ...s, proxy: config }))
     const tasks = [this.applyProxyToSession(session.defaultSession)]
-    for (const view of this.views.values()) {
-      tasks.push(this.applyProxyToSession(view.webContents.session))
+    for (const [instanceId, view] of this.views) {
+      tasks.push(this.applyProxyToSession(view.webContents.session, instanceId))
     }
     await Promise.all(tasks)
     this.broadcastState()
     return this.getEnrichedState()
   }
 
-  private async applyProxyToSession(target: Electron.Session): Promise<void> {
-    const proxy = this.getState().proxy
-    const proxyRules = proxy?.rules.trim() || ''
+  /**
+   * Proxy efetivo de uma sessão: o do serviço (se tiver) vence o global. Use "direct://" no proxy
+   * do serviço pra ele ignorar o proxy global.
+   */
+  private async applyProxyToSession(target: Electron.Session, instanceId?: string): Promise<void> {
+    const state = this.getState()
+    const service = instanceId ? state.services.find((s) => s.instanceId === instanceId) : undefined
+    const own = service?.proxy?.rules.trim()
+    const proxyRules = own || state.proxy?.rules.trim() || ''
     await target.setProxy({ proxyRules })
   }
 
@@ -248,6 +321,10 @@ export class ServicesManager {
     return this.patchState(() => ({ startMinimized: enabled }))
   }
 
+  setAutoUpdate(enabled: boolean): RendererState {
+    return this.patchState(() => ({ autoUpdate: enabled }))
+  }
+
   /**
    * Move um serviço pra outro workspace (drag-and-drop no switcher). Se o serviço
    * movido era o ativo, o workspace atual continua em foco e um irmão que ficou
@@ -280,11 +357,18 @@ export class ServicesManager {
     return this.getEnrichedState()
   }
 
-  /** Backup/transferência de configuração. Nunca inclui a senha; sessões (login de cada
-   * serviço) também ficam de fora — só a "planta" de serviços/workspaces é exportada. */
+  /**
+   * Backup/transferência manual. Nunca inclui a senha; sessões (login de cada serviço) também ficam
+   * de fora — só a "planta" de serviços/workspaces. A aprovação de JS é local e não viaja.
+   */
   exportConfig(): ExportedConfig {
-    const { passwordHash: _passwordHash, ...rest } = this.getState()
-    return rest
+    const { passwordHash: _passwordHash, sync: _sync, configUpdatedAt: _updatedAt, ...rest } = this.getState()
+    return {
+      ...rest,
+      services: rest.services
+        .filter((service) => service.catalogId !== PHONE_CATALOG_ID)
+        .map((service) => ({ ...service, approvedJsHash: null, jsPendingApproval: false }))
+    }
   }
 
   importConfig(config: ExportedConfig): ImportConfigResult {
@@ -295,52 +379,38 @@ export class ServicesManager {
     if (config.workspaces.length === 0) {
       return { ok: false, error: 'Configuração sem nenhum workspace.' }
     }
-    const workspaceIds = new Set(config.workspaces.map((w) => w.id))
-    const servicesValid = config.services.every(
-      (s) =>
-        typeof s.instanceId === 'string' &&
-        typeof s.url === 'string' &&
-        typeof s.partition === 'string' &&
-        workspaceIds.has(s.workspaceId)
-    )
-    if (!servicesValid) {
-      return { ok: false, error: 'Arquivo com serviços inválidos ou de um workspace inexistente.' }
+    // Mesma validação do sync: só http(s), tamanhos limitados, workspace existente etc. Um arquivo
+    // de fora nunca pode apontar um serviço pra file:// nem trazer JS gigante.
+    const payload = parseSyncPayload(config)
+    if (!payload) {
+      return { ok: false, error: 'Arquivo com serviços inválidos, de um workspace inexistente ou com URL não permitida.' }
     }
-    // Um JSON editado à mão pode ter um activeWorkspaceId que não existe mais
-    // entre os workspaces importados — cai pro primeiro nesse caso, em vez de
-    // deixar o app numa visão sem workspace válido.
-    const activeWorkspaceId = workspaceIds.has(config.activeWorkspaceId)
-      ? config.activeWorkspaceId
-      : config.workspaces[0].id
+    const rawProxyById = new Map<string, ServiceInstance['proxy']>()
+    for (const raw of config.services as Array<Partial<ServiceInstance>>) {
+      const rules = raw.proxy?.rules
+      if (typeof raw.instanceId === 'string' && typeof rules === 'string' && rules.trim()) {
+        rawProxyById.set(raw.instanceId, { rules: rules.trim() })
+      }
+    }
+    const globalRules = (config.proxy as ProxyConfig | null)?.rules
+    const globalProxy = typeof globalRules === 'string' && globalRules.trim() ? { rules: globalRules.trim() } : null
 
     try {
       for (const instanceId of [...this.views.keys()]) {
         this.destroyView(instanceId)
       }
       this.seenUnreadInstanceIds.clear()
-      // Um arquivo exportado por uma versão mais antiga do Deskbox pode não ter
-      // os campos mais novos (pinned/iconUrl por serviço, densidade, notificações,
-      // bandeja) — ?? cobre esse caso com os valores padrão em vez de undefined.
-      this.setState((s) => ({
-        ...s,
-        services: config.services.map((service) => ({
-          ...service,
-          pinned: service.pinned ?? false,
-          iconUrl: service.iconUrl ?? null
-        })),
-        workspaces: config.workspaces,
-        activeWorkspaceId,
-        activeInstanceId: null,
-        theme: config.theme,
-        proxy: config.proxy,
-        hibernateAfterMinutes: config.hibernateAfterMinutes,
-        onboardingDismissed: config.onboardingDismissed,
-        sidebarDensity: config.sidebarDensity ?? 'comfortable',
-        notificationsEnabled: config.notificationsEnabled ?? true,
-        minimizeToTray: config.minimizeToTray ?? s.minimizeToTray,
-        launchAtLogin: config.launchAtLogin ?? s.launchAtLogin,
-        startMinimized: config.startMinimized ?? s.startMinimized
-      }))
+      // applyPayload preserva o que é só deste dispositivo (bandeja, iniciar com o sistema, sync,
+      // aprovação de JS já dada a código idêntico) — um arquivo de fora não liga/desliga isso.
+      this.setState((s) => {
+        const next = applyPayload(s, payload)
+        return {
+          ...next,
+          proxy: globalProxy,
+          activeInstanceId: null,
+          services: next.services.map((service) => ({ ...service, proxy: rawProxyById.get(service.instanceId) ?? null }))
+        }
+      })
       const firstInWorkspace = this.servicesInWorkspace(this.getState().activeWorkspaceId)[0]
       if (firstInWorkspace) {
         this.setState((s) => ({ ...s, activeInstanceId: firstInWorkspace.instanceId }))
@@ -356,6 +426,126 @@ export class ServicesManager {
     } catch (error) {
       console.error('[deskbox] Falha ao importar configuração:', error)
       return { ok: false, error: 'Falha ao aplicar a configuração importada.' }
+    }
+  }
+
+  /**
+   * Aplica uma configuração vinda do sync de outro dispositivo. Views de serviços removidos ou
+   * cuja URL/CSS/JS mudou são descarregadas (recriadas sob demanda, já com a config nova).
+   */
+  applySyncedConfig(payload: SyncPayload, remoteUpdatedAt: number): void {
+    if (this.locked) return
+    const local = this.getState()
+    const next = applyPayload(local, payload)
+    const nextById = new Map(next.services.map((s) => [s.instanceId, s]))
+    const localById = new Map(local.services.map((s) => [s.instanceId, s]))
+    for (const instanceId of [...this.views.keys()]) {
+      const before = localById.get(instanceId)
+      const after = nextById.get(instanceId)
+      if (
+        !before ||
+        !after ||
+        before.url !== after.url ||
+        before.customCss !== after.customCss ||
+        before.customJs !== after.customJs
+      ) {
+        this.destroyView(instanceId)
+      }
+    }
+    for (const instanceId of [...this.seenUnreadInstanceIds]) {
+      if (!nextById.has(instanceId)) this.seenUnreadInstanceIds.delete(instanceId)
+    }
+    this.replaceState(next, remoteUpdatedAt)
+    const state = this.getState()
+    const activeId = state.activeInstanceId ?? this.servicesInWorkspace(state.activeWorkspaceId)[0]?.instanceId ?? null
+    if (activeId) {
+      if (state.activeInstanceId !== activeId) this.setState((s) => ({ ...s, activeInstanceId: activeId }))
+      this.showInstance(activeId)
+    } else {
+      this.hideActiveView()
+    }
+    this.updateBadge()
+    this.broadcastState()
+  }
+
+  /** Proxy próprio, CSS e JS de um serviço. Salvar = o usuário revisou o JS → aprova o código atual. */
+  async setServiceSettings(payload: ServiceSettingsPayload): Promise<RendererState> {
+    if (this.locked) return this.getEnrichedState()
+    const service = this.getState().services.find((s) => s.instanceId === payload.instanceId)
+    if (!service) return this.getEnrichedState()
+    if (payload.customCss.length > MAX_CUSTOM_CODE_LENGTH || payload.customJs.length > MAX_CUSTOM_CODE_LENGTH) {
+      return this.getEnrichedState()
+    }
+    const proxyRules = payload.proxy?.rules.trim() ?? ''
+    const proxy = proxyRules ? { rules: proxyRules } : null
+    const proxyChanged = proxyRules !== (service.proxy?.rules.trim() ?? '')
+    const jsChanged = payload.customJs !== service.customJs
+    const jsWasPending = service.customJs.trim() !== '' && !isJsApproved(service)
+    const cssChanged = payload.customCss !== service.customCss
+
+    this.setState((s) => ({
+      ...s,
+      services: s.services.map((sv) =>
+        sv.instanceId === payload.instanceId
+          ? {
+              ...sv,
+              proxy,
+              customCss: payload.customCss,
+              customJs: payload.customJs,
+              approvedJsHash: payload.customJs.trim() ? hashJs(payload.customJs) : null
+            }
+          : sv
+      )
+    }))
+
+    const view = this.views.get(payload.instanceId)
+    if (view && !view.webContents.isDestroyed()) {
+      try {
+        if (proxyChanged) await this.applyProxyToSession(view.webContents.session, payload.instanceId)
+        // Proxy novo e JS (novo ou recém-aprovado) só valem numa página limpa → recarrega.
+        // Só CSS muda sem recarregar (troca a folha injetada, preservando o estado da página).
+        if (proxyChanged || jsChanged || (jsWasPending && payload.customJs.trim())) {
+          view.webContents.reload()
+        } else if (cssChanged) {
+          await this.refreshCss(payload.instanceId, view.webContents)
+        }
+      } catch (error) {
+        console.error('[deskbox] Falha ao aplicar configurações do serviço:', error)
+      }
+    }
+    this.broadcastState()
+    return this.getEnrichedState()
+  }
+
+  /** Remover o serviço de celular também revoga o pareamento (o token deixa de valer). */
+  private forgetPhoneOf(instanceId: string): void {
+    const service = this.getState().services.find((s) => s.instanceId === instanceId)
+    if (service?.catalogId !== PHONE_CATALOG_ID) return
+    const deviceId = phoneDeviceIdFromUrl(service.url)
+    if (deviceId) this.phone?.forget(deviceId)
+  }
+
+  private async refreshCss(instanceId: string, webContents: Electron.WebContents): Promise<void> {
+    const previousKey = this.cssKeys.get(instanceId)
+    this.cssKeys.delete(instanceId)
+    if (previousKey) await webContents.removeInsertedCSS(previousKey).catch(() => undefined)
+    const service = this.getState().services.find((s) => s.instanceId === instanceId)
+    if (!service || !service.customCss.trim() || webContents.isDestroyed()) return
+    const key = await webContents.insertCSS(service.customCss)
+    this.cssKeys.set(instanceId, key)
+  }
+
+  /** Roda a cada carregamento de página do serviço (dom-ready): CSS sempre, JS só se aprovado neste dispositivo. */
+  private async injectCustomizations(instanceId: string, webContents: Electron.WebContents): Promise<void> {
+    const service = this.getState().services.find((s) => s.instanceId === instanceId)
+    if (!service || webContents.isDestroyed()) return
+    try {
+      await this.refreshCss(instanceId, webContents)
+      if (service.customJs.trim() && isJsApproved(service)) {
+        await webContents.executeJavaScript(service.customJs, true)
+      }
+    } catch (error) {
+      console.error(`[deskbox] Falha ao aplicar CSS/JS personalizado em "${service.name}":`, error)
     }
   }
 
@@ -493,18 +683,24 @@ export class ServicesManager {
         minimizeToTray: state.minimizeToTray,
         launchAtLogin: state.launchAtLogin,
         startMinimized: state.startMinimized,
+        autoUpdate: state.autoUpdate,
+        configUpdatedAt: state.configUpdatedAt,
+        sync: null,
         hasPassword,
         locked: true
       }
     }
+    const { sync: _sync, ...publicState } = state
     return {
-      ...state,
+      ...publicState,
       hasPassword,
       locked: false,
+      sync: this.syncViewProvider(),
       services: state.services.map((service) => ({
         ...service,
         hibernated: !this.views.has(service.instanceId),
-        loading: this.loadingInstanceIds.has(service.instanceId)
+        loading: this.loadingInstanceIds.has(service.instanceId),
+        jsPendingApproval: !isJsApproved(service)
       }))
     }
   }
@@ -513,18 +709,38 @@ export class ServicesManager {
     if (this.locked) return this.getEnrichedState()
     const catalogEntry = payload.catalogId ? findCatalogEntry(payload.catalogId) : undefined
     const name = catalogEntry?.name ?? payload.name ?? 'Site personalizado'
-    const url = catalogEntry?.url ?? payload.url
-    if (!url) {
+    const url = catalogEntry?.url ?? payload.url?.trim()
+    // Só http(s): uma URL inválida (ou file:, javascript:...) nunca vira serviço — além de não
+    // carregar, quebraria a validação do arquivo de sync.
+    if (!isHttpUrl(url)) {
       return this.getEnrichedState()
     }
-    const workspaceId = this.getState().activeWorkspaceId
-    const instanceId = randomUUID()
-    const instance: ServiceInstance = {
-      instanceId,
+    const iconUrl = payload.iconUrl?.trim()
+    const instance = this.buildInstance({
       catalogId: catalogEntry?.id ?? 'custom',
-      name,
+      name: name.trim().slice(0, 80) || 'Site personalizado',
       url,
       domain: catalogEntry?.domain ?? domainFromUrl(url),
+      iconUrl: isHttpUrl(iconUrl) ? iconUrl : null
+    })
+    this.setState((s) => ({
+      ...s,
+      services: [...s.services, instance],
+      activeInstanceId: instance.instanceId
+    }))
+    this.showInstance(instance.instanceId)
+    this.broadcastState()
+    return this.getEnrichedState()
+  }
+
+  private buildInstance(
+    base: Pick<ServiceInstance, 'catalogId' | 'name' | 'url' | 'domain' | 'iconUrl'>
+  ): ServiceInstance {
+    const workspaceId = this.getState().activeWorkspaceId
+    const instanceId = randomUUID()
+    return {
+      ...base,
+      instanceId,
       partition: `persist:deskbox-${instanceId}`,
       workspaceId,
       order: this.servicesInWorkspace(workspaceId).length,
@@ -533,20 +749,17 @@ export class ServicesManager {
       hibernated: false,
       loading: true,
       pinned: false,
-      iconUrl: payload.iconUrl?.trim() || null
+      proxy: null,
+      customCss: '',
+      customJs: '',
+      approvedJsHash: null,
+      jsPendingApproval: false
     }
-    this.setState((s) => ({
-      ...s,
-      services: [...s.services, instance],
-      activeInstanceId: instanceId
-    }))
-    this.showInstance(instanceId)
-    this.broadcastState()
-    return this.getEnrichedState()
   }
 
   removeService(instanceId: string): RendererState {
     if (this.locked) return this.getEnrichedState()
+    this.forgetPhoneOf(instanceId)
     this.destroyView(instanceId)
     this.seenUnreadInstanceIds.delete(instanceId)
     const state = this.setState((s) => {
@@ -624,6 +837,7 @@ export class ServicesManager {
       return this.getEnrichedState()
     }
     for (const service of current.services.filter((s) => s.workspaceId === workspaceId)) {
+      this.forgetPhoneOf(service.instanceId)
       this.destroyView(service.instanceId)
       this.seenUnreadInstanceIds.delete(service.instanceId)
     }
@@ -667,6 +881,14 @@ export class ServicesManager {
     return state.services.filter((service) => service.workspaceId === workspaceId).sort((a, b) => a.order - b.order)
   }
 
+  /** Serviços normais carregam a URL salva; o de celular aponta pro viewer local (porta dinâmica). */
+  private async resolveServiceUrl(instance: ServiceInstance): Promise<string> {
+    if (instance.catalogId !== PHONE_CATALOG_ID) return instance.url
+    const deviceId = phoneDeviceIdFromUrl(instance.url)
+    if (!deviceId || !this.phone) throw new Error('Servidor de celular indisponível.')
+    return this.phone.viewerUrl(deviceId)
+  }
+
   private createViewForInstance(instance: ServiceInstance): void {
     const partitionSession = session.fromPartition(instance.partition)
     partitionSession.setPermissionRequestHandler((_webContents, permission, callback) => {
@@ -686,14 +908,19 @@ export class ServicesManager {
     // primeira requisição fora do proxy configurado. .catch() evita unhandled
     // rejection se setProxy falhar, e isDestroyed() evita chamar loadURL num
     // BrowserView já removido (ex.: serviço excluído enquanto a promise corria).
-    this.applyProxyToSession(partitionSession)
+    this.applyProxyToSession(partitionSession, instance.instanceId)
       .catch((error) => console.error('[deskbox] Falha ao aplicar proxy:', error))
-      .finally(() => {
+      .then(() => this.resolveServiceUrl(instance))
+      .then((url) => {
         if (!view.webContents.isDestroyed()) {
-          view.webContents.loadURL(instance.url)
+          void view.webContents.loadURL(url)
         }
       })
+      .catch((error) => console.error(`[deskbox] Falha ao carregar "${instance.name}":`, error))
     this.registerShortcuts(view.webContents)
+    view.webContents.on('dom-ready', () => {
+      void this.injectCustomizations(instance.instanceId, view.webContents)
+    })
     view.webContents.on('did-start-loading', () => {
       this.loadingInstanceIds.add(instance.instanceId)
       this.broadcastState()
@@ -752,6 +979,7 @@ export class ServicesManager {
     this.views.delete(instanceId)
     this.lastActiveAt.delete(instanceId)
     this.loadingInstanceIds.delete(instanceId)
+    this.cssKeys.delete(instanceId)
   }
 
   private sweepHibernation(): void {

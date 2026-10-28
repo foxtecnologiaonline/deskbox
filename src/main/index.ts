@@ -7,11 +7,16 @@ import type {
   ExportedConfig,
   ImportConfigResult,
   ProxyConfig,
+  ServiceSettingsPayload,
   SetPasswordPayload,
+  SetSyncPayload,
   SidebarDensity
 } from '@shared/types'
 import { Store } from './store'
 import { ServicesManager } from './services-manager'
+import { SyncManager } from './sync/sync-manager'
+import { Updater } from './updater'
+import { PhoneServer } from './phone/phone-server'
 
 // Build portátil (electron-builder "portable" no Windows): ao rodar o .exe
 // direto de um pendrive/pasta, sem instalar, o electron-builder expõe a pasta
@@ -33,6 +38,13 @@ let mainWindow: BrowserWindow | null = null
 // via rebindWindow() em vez de ser recriado (ver ServicesManager.rebindWindow).
 let manager: ServicesManager | null = null
 const store = new Store()
+let syncManager: SyncManager | null = null
+let updater: Updater | null = null
+// Servidor do controle de celular (sinalização WebRTC na LAN). Sobe sob demanda — só se já houver
+// celular pareado ou quando o usuário abrir o pareamento.
+const phoneServer = new PhoneServer(join(app.getPath('userData'), 'phones.json'), (event) =>
+  manager?.handlePhoneEvent(event)
+)
 let tray: Tray | null = null
 // true só entre o clique em "Sair" do tray e o app.quit() de fato — sem essa
 // flag, o handler de 'close' (que vira minimizar pra bandeja) interceptaria
@@ -154,8 +166,17 @@ function createMainWindow(): void {
     manager = new ServicesManager(
       mainWindow,
       () => store.getState(),
-      (updater) => store.setState(updater)
+      (updateState) => store.setState(updateState),
+      (next, remoteUpdatedAt) => store.replaceFromRemote(next, remoteUpdatedAt)
     )
+    manager.attachPhoneServer(phoneServer)
+    syncManager = new SyncManager(store, {
+      isLocked: () => manager?.isLocked() ?? true,
+      applyRemote: (payload, remoteUpdatedAt) => manager?.applySyncedConfig(payload, remoteUpdatedAt),
+      statusChanged: () => manager?.refreshState()
+    })
+    manager.setSyncViewProvider(() => syncManager?.getView() ?? null)
+    manager.onUnlocked(() => void syncManager?.syncNow())
     manager.init()
   }
 
@@ -225,6 +246,43 @@ function registerIpcHandlers(): void {
       return { ok: false, error: 'Arquivo inválido ou corrompido.' }
     }
   })
+  ipcMain.handle(IPC.SET_SERVICE_SETTINGS, (_event, payload: ServiceSettingsPayload) =>
+    manager!.setServiceSettings(payload)
+  )
+  ipcMain.handle(IPC.SET_AUTO_UPDATE, (_event, enabled: boolean) => manager!.setAutoUpdate(enabled))
+  ipcMain.handle(IPC.GET_UPDATE_STATUS, () => updater!.getStatus())
+  ipcMain.handle(IPC.CHECK_FOR_UPDATES, () => updater!.check())
+  ipcMain.handle(IPC.INSTALL_UPDATE, () =>
+    updater!.install(() => {
+      isQuitting = true
+    })
+  )
+  ipcMain.handle(IPC.OPEN_RELEASES, () => {
+    const url = updater!.getStatus().releaseUrl ?? 'https://github.com/foxtecnologiaonline/deskbox/releases'
+    // Só abre páginas de release do próprio repositório — o renderer não escolhe a URL.
+    if (url.startsWith('https://github.com/foxtecnologiaonline/deskbox/releases')) void shell.openExternal(url)
+  })
+  ipcMain.handle(IPC.CHOOSE_SYNC_FOLDER, async (): Promise<string | null> => {
+    if (manager!.isLocked()) return null
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Escolha a pasta de sincronização',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
+  ipcMain.handle(IPC.ENABLE_SYNC, (_event, payload: SetSyncPayload, resolve?: 'remote' | 'local') =>
+    syncManager!.enable(payload.folder, payload.passphrase, resolve)
+  )
+  ipcMain.handle(IPC.DISABLE_SYNC, () => {
+    if (!manager!.isLocked()) syncManager!.disable()
+  })
+  ipcMain.handle(IPC.SYNC_NOW, () => syncManager!.syncNow())
+  ipcMain.handle(IPC.SYNC_PASSPHRASE, (_event, passphrase: string) => syncManager!.providePassphrase(passphrase))
+  ipcMain.handle(IPC.PHONE_START_PAIRING, () => {
+    if (manager!.isLocked()) throw new Error('Destrave o app antes de parear.')
+    return phoneServer.startPairing()
+  })
+  ipcMain.handle(IPC.PHONE_CANCEL_PAIRING, () => phoneServer.cancelPairing())
   ipcMain.handle(IPC.TOGGLE_SERVICE_PINNED, (_event, instanceId: string) => manager!.toggleServicePinned(instanceId))
   ipcMain.handle(IPC.SET_SIDEBAR_DENSITY, (_event, density: SidebarDensity) => manager!.setSidebarDensity(density))
   ipcMain.handle(IPC.SET_NOTIFICATIONS_ENABLED, (_event, enabled: boolean) =>
@@ -263,6 +321,19 @@ app.whenReady().then(() => {
   createMainWindow()
   syncTray()
 
+  updater = new Updater(
+    (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.UPDATE_STATUS, status)
+    },
+    () => store.getState().autoUpdate
+  )
+  updater.start()
+  syncManager?.start()
+  // Celulares já pareados precisam achar o servidor no ar pra reconectar sozinhos.
+  if (phoneServer.hasPairedPhones()) {
+    phoneServer.ensureStarted().catch((error) => console.error('[deskbox] Servidor de celular não iniciou:', error))
+  }
+
   app.on('activate', () => showMainWindow())
 
   // isQuitting também precisa ficar true pra qualquer saída que não passe pelo
@@ -273,6 +344,9 @@ app.whenReady().then(() => {
   // window-all-closed nunca dispara).
   app.on('before-quit', () => {
     isQuitting = true
+    syncManager?.dispose()
+    updater?.dispose()
+    phoneServer.dispose()
   })
 })
 

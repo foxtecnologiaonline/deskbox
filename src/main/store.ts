@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import type { DeskboxState } from '@shared/types'
+import { syncableEqual } from './sync/payload'
 
 const DEFAULT_WORKSPACE_ID = 'default'
 
@@ -19,12 +20,16 @@ const DEFAULT_STATE: DeskboxState = {
   notificationsEnabled: true,
   minimizeToTray: false,
   launchAtLogin: false,
-  startMinimized: false
+  startMinimized: false,
+  autoUpdate: true,
+  configUpdatedAt: 0,
+  sync: null
 }
 
 export class Store {
   private filePath: string
   private state: DeskboxState
+  private syncableListeners = new Set<() => void>()
 
   constructor() {
     this.filePath = join(app.getPath('userData'), 'deskbox-config.json')
@@ -44,7 +49,12 @@ export class Store {
           ...service,
           workspaceId: service.workspaceId ?? fallbackWorkspaceId,
           pinned: service.pinned ?? false,
-          iconUrl: service.iconUrl ?? null
+          iconUrl: service.iconUrl ?? null,
+          proxy: service.proxy ?? null,
+          customCss: service.customCss ?? '',
+          customJs: service.customJs ?? '',
+          approvedJsHash: service.approvedJsHash ?? null,
+          jsPendingApproval: false
         }))
         return merged
       }
@@ -68,8 +78,29 @@ export class Store {
   }
 
   setState(updater: (state: DeskboxState) => DeskboxState): DeskboxState {
-    this.state = updater(this.state)
+    const previous = this.state
+    this.state = updater(previous)
+    const changedSyncable = !syncableEqual(previous, this.state)
+    // Carimbo monotônico: nunca menor/igual ao anterior, mesmo com relógio atrasado — senão uma edição
+    // local feita logo depois de receber uma config "do futuro" perderia pro remoto no last-writer-wins.
+    if (changedSyncable) {
+      this.state = { ...this.state, configUpdatedAt: Math.max(Date.now(), previous.configUpdatedAt + 1) }
+    }
+    this.persist()
+    if (changedSyncable) this.syncableListeners.forEach((listener) => listener())
+    return this.state
+  }
+
+  /** Aplica um estado vindo do sync mantendo o carimbo do remoto — e sem disparar um novo push. */
+  replaceFromRemote(next: DeskboxState, remoteUpdatedAt: number): DeskboxState {
+    this.state = { ...next, configUpdatedAt: remoteUpdatedAt }
     this.persist()
     return this.state
+  }
+
+  /** Avisa quando algo que viaja entre dispositivos mudou (não dispara por unread/hibernação etc.). */
+  onSyncableChange(listener: () => void): () => void {
+    this.syncableListeners.add(listener)
+    return () => this.syncableListeners.delete(listener)
   }
 }

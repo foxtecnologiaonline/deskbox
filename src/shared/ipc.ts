@@ -28,5 +28,20 @@ export const IPC = {
   SET_NOTIFICATIONS_ENABLED: 'deskbox:set-notifications-enabled',
   SET_MINIMIZE_TO_TRAY: 'deskbox:set-minimize-to-tray',
   SET_LAUNCH_AT_LOGIN: 'deskbox:set-launch-at-login',
-  SET_START_MINIMIZED: 'deskbox:set-start-minimized'
+  SET_START_MINIMIZED: 'deskbox:set-start-minimized',
+  SET_SERVICE_SETTINGS: 'deskbox:set-service-settings',
+  SET_AUTO_UPDATE: 'deskbox:set-auto-update',
+  GET_UPDATE_STATUS: 'deskbox:get-update-status',
+  CHECK_FOR_UPDATES: 'deskbox:check-for-updates',
+  INSTALL_UPDATE: 'deskbox:install-update',
+  UPDATE_STATUS: 'deskbox:update-status',
+  OPEN_RELEASES: 'deskbox:open-releases',
+  CHOOSE_SYNC_FOLDER: 'deskbox:choose-sync-folder',
+  ENABLE_SYNC: 'deskbox:enable-sync',
+  DISABLE_SYNC: 'deskbox:disable-sync',
+  SYNC_NOW: 'deskbox:sync-now',
+  SYNC_PASSPHRASE: 'deskbox:sync-passphrase',
+  PHONE_START_PAIRING: 'deskbox:phone-start-pairing',
+  PHONE_CANCEL_PAIRING: 'deskbox:phone-cancel-pairing',
+  PHONE_CHANGED: 'deskbox:phone-changed'
 } as const

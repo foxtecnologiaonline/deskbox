@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import type { ProxyConfig, SidebarDensity } from '@shared/types'
+import { useEffect, useState } from 'react'
+import type { ProxyConfig, SidebarDensity, SyncView, UpdateStatus } from '@shared/types'
 import { showToast } from '../toast'
 
 interface SettingsModalProps {
@@ -11,7 +11,25 @@ interface SettingsModalProps {
   minimizeToTray: boolean
   launchAtLogin: boolean
   startMinimized: boolean
+  autoUpdate: boolean
+  sync: SyncView | null
+  pendingJsCount: number
   onClose: () => void
+}
+
+function formatTime(ms: number): string {
+  return new Date(ms).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+const UPDATE_LABEL: Record<UpdateStatus['state'], string> = {
+  idle: 'Nenhuma verificação feita ainda.',
+  checking: 'Verificando…',
+  available: 'Nova versão disponível.',
+  downloading: 'Baixando atualização…',
+  downloaded: 'Atualização pronta para instalar.',
+  'not-available': 'Você está na versão mais recente.',
+  error: 'Não foi possível verificar.',
+  unsupported: 'Indisponível neste modo.'
 }
 
 const HIBERNATE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -35,6 +53,9 @@ export default function SettingsModal({
   minimizeToTray,
   launchAtLogin,
   startMinimized,
+  autoUpdate,
+  sync,
+  pendingJsCount,
   onClose
 }: SettingsModalProps): JSX.Element {
   const [currentPassword, setCurrentPassword] = useState('')
@@ -44,6 +65,57 @@ export default function SettingsModal({
 
   const [proxyRules, setProxyRules] = useState(proxy?.rules ?? '')
   const [busy, setBusy] = useState(false)
+
+  const [update, setUpdate] = useState<UpdateStatus | null>(null)
+  useEffect(() => {
+    window.deskbox.getUpdateStatus().then(setUpdate)
+    return window.deskbox.onUpdateStatus(setUpdate)
+  }, [])
+
+  const [syncFolder, setSyncFolder] = useState('')
+  const [syncPassphrase, setSyncPassphrase] = useState('')
+  const [syncError, setSyncError] = useState<string | null>(null)
+  const [syncConflict, setSyncConflict] = useState<{ updatedAt: number; services: number; workspaces: number } | null>(null)
+  const [syncBusy, setSyncBusy] = useState(false)
+  const [newPassphrase, setNewPassphrase] = useState('')
+
+  async function handleChooseFolder(): Promise<void> {
+    const folder = await window.deskbox.chooseSyncFolder()
+    if (folder) setSyncFolder(folder)
+  }
+
+  async function handleEnableSync(resolve?: 'remote' | 'local'): Promise<void> {
+    setSyncBusy(true)
+    setSyncError(null)
+    const result = await window.deskbox.enableSync({ folder: syncFolder, passphrase: syncPassphrase || undefined }, resolve)
+    setSyncBusy(false)
+    if (result.ok) {
+      setSyncConflict(null)
+      setSyncPassphrase('')
+      showToast('Sincronização ativada.')
+    } else if (result.conflict) {
+      setSyncConflict(result.conflict)
+    } else {
+      setSyncError(result.error ?? 'Não foi possível ativar.')
+    }
+  }
+
+  async function handleProvidePassphrase(): Promise<void> {
+    setSyncBusy(true)
+    const result = await window.deskbox.provideSyncPassphrase(newPassphrase)
+    setSyncBusy(false)
+    if (result.ok) {
+      setNewPassphrase('')
+      showToast('Sincronização retomada.')
+    }
+  }
+
+  async function handleDisableSync(): Promise<void> {
+    if (!window.confirm('Desativar a sincronização neste dispositivo? O arquivo na pasta não é apagado.')) return
+    await window.deskbox.disableSync()
+    setSyncFolder('')
+    showToast('Sincronização desativada.')
+  }
 
   async function handleSetPassword(e: React.FormEvent): Promise<void> {
     e.preventDefault()
@@ -244,6 +316,166 @@ export default function SettingsModal({
             <input type="checkbox" checked={startMinimized} onChange={handleStartMinimizedChange} />
             Iniciar minimizado (só na bandeja)
           </label>
+        </section>
+
+        <section className="settings-section">
+          <h3>Atualizações</h3>
+          <p className="settings-hint">
+            Versão atual: <strong>{update?.currentVersion ?? '…'}</strong>
+            {update?.portable ? ' (portátil — não se atualiza sozinha)' : ''}
+          </p>
+          <label className="settings-checkbox-label">
+            <input
+              type="checkbox"
+              checked={autoUpdate}
+              onChange={(e) => window.deskbox.setAutoUpdate(e.target.checked)}
+            />
+            Verificar atualizações automaticamente
+          </label>
+          {update && (
+            <p className={update.state === 'error' ? 'settings-error' : 'settings-hint'}>
+              {update.state === 'error' || update.state === 'unsupported' ? update.error : UPDATE_LABEL[update.state]}
+              {update.version && (update.state === 'available' || update.state === 'downloading' || update.state === 'downloaded')
+                ? ` v${update.version}`
+                : ''}
+              {update.state === 'downloading' && update.progress !== undefined ? ` ${update.progress}%` : ''}
+            </p>
+          )}
+          <div className="custom-form-actions">
+            {update?.state === 'available' && update.portable ? (
+              <button type="button" className="link-button" onClick={() => window.deskbox.openReleases()}>
+                Abrir página da versão
+              </button>
+            ) : (
+              <span />
+            )}
+            {update?.state === 'downloaded' ? (
+              <button type="button" className="primary-button" onClick={() => window.deskbox.installUpdate()}>
+                Reiniciar e instalar
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="link-button"
+                disabled={update?.state === 'checking' || update?.state === 'downloading'}
+                onClick={() => window.deskbox.checkForUpdates()}
+              >
+                Verificar agora
+              </button>
+            )}
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <h3>Sincronização entre dispositivos</h3>
+          {!sync ? (
+            <>
+              <p className="settings-hint">
+                Mantém serviços, workspaces, tema e CSS/JS iguais em vários computadores usando uma pasta que você já
+                sincroniza (Dropbox, OneDrive, Google Drive, Syncthing…). Sem conta e sem servidor nosso. Logins e
+                proxies <strong>não</strong> sincronizam — cada dispositivo mantém os seus.
+              </p>
+              <div className="custom-form">
+                <div className="sync-folder-row">
+                  <input value={syncFolder} readOnly placeholder="Nenhuma pasta escolhida" />
+                  <button type="button" className="link-button" onClick={handleChooseFolder}>
+                    Escolher pasta…
+                  </button>
+                </div>
+                <label>
+                  Senha para criptografar o arquivo (recomendado)
+                  <input
+                    type="password"
+                    value={syncPassphrase}
+                    onChange={(e) => setSyncPassphrase(e.target.value)}
+                    placeholder="Use a mesma senha nos outros dispositivos"
+                  />
+                </label>
+                {syncError && <p className="settings-error">{syncError}</p>}
+                {syncError && syncFolder && (
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => {
+                      if (window.confirm('Substituir o arquivo de sincronização da pasta pela configuração DESTE dispositivo?')) {
+                        void handleEnableSync('local')
+                      }
+                    }}
+                  >
+                    Substituir o arquivo da pasta por esta configuração
+                  </button>
+                )}
+                {syncConflict && (
+                  <div className="settings-conflict">
+                    <p>
+                      Já existe uma configuração nesta pasta ({syncConflict.services} serviços, {syncConflict.workspaces}{' '}
+                      workspaces, de {formatTime(syncConflict.updatedAt)}) diferente da deste dispositivo.
+                    </p>
+                    <div className="custom-form-actions">
+                      <button type="button" className="link-button" onClick={() => setSyncConflict(null)}>
+                        Cancelar
+                      </button>
+                      <button type="button" className="link-button" onClick={() => handleEnableSync('local')}>
+                        Manter a deste dispositivo
+                      </button>
+                      <button type="button" className="primary-button" onClick={() => handleEnableSync('remote')}>
+                        Usar a da pasta
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="custom-form-actions">
+                  <span />
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={!syncFolder || syncBusy}
+                    onClick={() => handleEnableSync()}
+                  >
+                    Ativar sincronização
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="settings-hint">
+                Pasta: <code>{sync.folder}</code> · {sync.encrypted ? 'criptografado' : 'sem criptografia'}
+              </p>
+              <p className={sync.status === 'error' || sync.status === 'needs-passphrase' ? 'settings-error' : 'settings-hint'}>
+                {sync.status === 'syncing'
+                  ? 'Sincronizando…'
+                  : sync.error ?? (sync.lastSyncAt ? `Sincronizado em ${formatTime(sync.lastSyncAt)}.` : 'Aguardando a primeira sincronização.')}
+              </p>
+              {(sync.status === 'needs-passphrase' || (sync.status === 'error' && sync.error?.includes('Senha'))) && (
+                <div className="sync-folder-row">
+                  <input
+                    type="password"
+                    value={newPassphrase}
+                    onChange={(e) => setNewPassphrase(e.target.value)}
+                    placeholder="Senha de sincronização"
+                  />
+                  <button type="button" className="link-button" disabled={syncBusy} onClick={handleProvidePassphrase}>
+                    Informar senha
+                  </button>
+                </div>
+              )}
+              {pendingJsCount > 0 && (
+                <p className="settings-warning">
+                  {pendingJsCount} serviço(s) com JS personalizado vindo de outro dispositivo aguardando sua aprovação (clique
+                  direito no ícone → Configurar).
+                </p>
+              )}
+              <div className="custom-form-actions">
+                <button type="button" className="link-button" onClick={handleDisableSync}>
+                  Desativar
+                </button>
+                <button type="button" className="link-button" onClick={() => window.deskbox.syncNow()}>
+                  Sincronizar agora
+                </button>
+              </div>
+            </>
+          )}
         </section>
 
         <section className="settings-section">

@@ -3,11 +3,17 @@ import { IPC } from '@shared/ipc'
 import type {
   AddServicePayload,
   ImportConfigResult,
+  PairingInfo,
+  PhoneEvent,
   ProxyConfig,
   RendererState,
+  ServiceSettingsPayload,
   SetPasswordResult,
+  SetSyncPayload,
   SidebarDensity,
-  Theme
+  SyncResult,
+  Theme,
+  UpdateStatus
 } from '@shared/types'
 
 const api = {
@@ -49,6 +55,34 @@ const api = {
     ipcRenderer.invoke(IPC.SET_LAUNCH_AT_LOGIN, enabled),
   setStartMinimized: (enabled: boolean): Promise<RendererState> =>
     ipcRenderer.invoke(IPC.SET_START_MINIMIZED, enabled),
+  setServiceSettings: (payload: ServiceSettingsPayload): Promise<RendererState> =>
+    ipcRenderer.invoke(IPC.SET_SERVICE_SETTINGS, payload),
+  setAutoUpdate: (enabled: boolean): Promise<RendererState> => ipcRenderer.invoke(IPC.SET_AUTO_UPDATE, enabled),
+  getUpdateStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.GET_UPDATE_STATUS),
+  checkForUpdates: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.CHECK_FOR_UPDATES),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke(IPC.INSTALL_UPDATE),
+  openReleases: (): Promise<void> => ipcRenderer.invoke(IPC.OPEN_RELEASES),
+  chooseSyncFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.CHOOSE_SYNC_FOLDER),
+  enableSync: (
+    payload: SetSyncPayload,
+    resolve?: 'remote' | 'local'
+  ): Promise<SyncResult & { conflict?: { updatedAt: number; services: number; workspaces: number } }> =>
+    ipcRenderer.invoke(IPC.ENABLE_SYNC, payload, resolve),
+  disableSync: (): Promise<void> => ipcRenderer.invoke(IPC.DISABLE_SYNC),
+  syncNow: (): Promise<void> => ipcRenderer.invoke(IPC.SYNC_NOW),
+  provideSyncPassphrase: (passphrase: string): Promise<SyncResult> => ipcRenderer.invoke(IPC.SYNC_PASSPHRASE, passphrase),
+  startPhonePairing: (): Promise<PairingInfo> => ipcRenderer.invoke(IPC.PHONE_START_PAIRING),
+  cancelPhonePairing: (): Promise<void> => ipcRenderer.invoke(IPC.PHONE_CANCEL_PAIRING),
+  onUpdateStatus: (callback: (status: UpdateStatus) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: UpdateStatus): void => callback(status)
+    ipcRenderer.on(IPC.UPDATE_STATUS, listener)
+    return () => ipcRenderer.removeListener(IPC.UPDATE_STATUS, listener)
+  },
+  onPhoneChanged: (callback: (event: PhoneEvent) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, phoneEvent: PhoneEvent): void => callback(phoneEvent)
+    ipcRenderer.on(IPC.PHONE_CHANGED, listener)
+    return () => ipcRenderer.removeListener(IPC.PHONE_CHANGED, listener)
+  },
   onStateChanged: (callback: (state: RendererState) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: RendererState): void => callback(state)
     ipcRenderer.on(IPC.STATE_CHANGED, listener)

@@ -15,6 +15,8 @@ Veja a análise do produto de referência em [`docs/analise-rambox.md`](docs/ana
 npm install
 npm run dev        # app em modo desenvolvimento (hot reload do renderer)
 npm run typecheck  # checagem de tipos (main, preload, renderer)
+npm test           # testes (sync, criptografia, servidor do celular) — Node puro, sem display
+npm run e2e        # ponta a ponta com o Electron de verdade (CSS/JS, proxy por serviço, viewer WebRTC); precisa de xvfb no Linux
 npm run build      # build de produção para out/
 npm run dist       # empacota o app da plataforma atual (electron-builder) em release/
 npm run dist:mac   # empacota .dmg (precisa rodar em macOS)
@@ -51,6 +53,10 @@ npm run dist:linux # empacota AppImage + .deb
 - Indicador visual de onde o item vai cair ao reordenar a sidebar por arrastar-e-soltar.
 - Cada workspace tem uma cor própria (determinística, sem precisar configurar nada) pra diferenciar mais rápido no switcher.
 - **Densidade da sidebar** (confortável/compacta) ajustável nas Configurações, pra quem tem muitos serviços abertos.
+- **CSS, JavaScript e proxy por serviço** (clique direito no ícone → Configurar): injeta CSS/JS a cada carregamento e roteia só aquele serviço por um proxy próprio (`direct://` ignora o global). JS que vem de outro dispositivo/arquivo importado **só roda depois que você revisa e salva** neste computador.
+- **Sincronização entre dispositivos** por uma pasta que você já sincroniza (Dropbox, OneDrive, Google Drive, Syncthing…): serviços, workspaces, tema e CSS/JS iguais em todos os computadores, com criptografia opcional (AES-256-GCM + scrypt). Sem conta e sem servidor. Logins e proxies **não** sincronizam.
+- **Auto-update** (instalador Windows e AppImage Linux; o portátil só avisa) via GitHub Releases — ver [`docs/release.md`](docs/release.md).
+- **Controle de celular Android** dentro de um serviço do Deskbox: espelha a tela do celular e deixa tocar, arrastar e digitar, tudo na rede local (WebRTC). Veja [`android/README.md`](android/README.md) e [`docs/phone-protocol.md`](docs/phone-protocol.md).
 
 ## Tamanho do build
 
@@ -62,4 +68,6 @@ Pra máquinas corporativas onde instalar programas é bloqueado: o build Windows
 
 ## Roadmap
 
-Ver seção "Fora do escopo" em `docs/deskbox-spec.md`: CSS/JS customizado por serviço, proxy por serviço, sincronização entre dispositivos, criptografia local, auto-update e assinatura de código.
+Ver seção "Fora do escopo" em `docs/deskbox-spec.md`: criptografia local dos dados de sessão, TLS com fingerprint fixado na sinalização do celular, controle de celular fora da rede local (relay/TURN) e iPhone.
+
+**Assinatura de código**: o pipeline já está pronto (`scripts/ci-build.mjs`, `docs/release.md`), mas depende de **um certificado seu** cadastrado nos segredos do GitHub — sem ele os builds saem sem assinatura e o SmartScreen avisa.

@@ -11,6 +11,10 @@ on:
           - ambos
           - portable
           - instalador
+      require_signature:
+        description: 'Falhar se os .exe não saírem com assinatura válida'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -27,29 +31,45 @@ jobs:
 
       - run: npm ci
 
+      # Informativo aqui (não bloqueia a geração do instalador); o workflow Release e o CI é que barram por teste.
+      - run: npm test
+        continue-on-error: true
+
       - run: npm run build
 
-      - name: Build (ambos)
-        if: ${{ inputs.build_target == 'ambos' }}
-        run: npx electron-builder --win --publish=never
+      # Assinatura de código: scripts/ci-build.mjs escolhe o modo pelos segredos do repositório
+      # (certificado .pfx em WIN_CSC_LINK, ou Azure Trusted Signing em AZURE_*). Sem nenhum segredo o
+      # build sai sem assinatura — funciona, mas o Windows SmartScreen mostra "editor desconhecido".
+      - name: Build
+        run: node scripts/ci-build.mjs --win ${{ inputs.build_target == 'portable' && 'portable' || inputs.build_target == 'instalador' && 'nsis' || '' }} --publish=never
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TS_ENDPOINT: ${{ secrets.AZURE_TS_ENDPOINT }}
+          AZURE_TS_ACCOUNT: ${{ secrets.AZURE_TS_ACCOUNT }}
+          AZURE_TS_PROFILE: ${{ secrets.AZURE_TS_PROFILE }}
+          AZURE_TS_PUBLISHER: ${{ secrets.AZURE_TS_PUBLISHER }}
 
-      - name: Build (só portable)
-        if: ${{ inputs.build_target == 'portable' }}
-        run: npx electron-builder --win portable --publish=never
+      - name: Verificar assinatura dos .exe
+        shell: pwsh
+        run: |
+          $invalid = 0
+          Get-ChildItem release -Filter *.exe | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            Write-Host ("{0}: {1} {2}" -f $_.Name, $sig.Status, $sig.SignerCertificate.Subject)
+            if ($sig.Status -ne 'Valid') { $invalid++ }
+          }
+          if ($invalid -gt 0) {
+            if ('${{ inputs.require_signature }}' -eq 'true') { Write-Error "$invalid binário(s) sem assinatura válida."; exit 1 }
+            Write-Host "::warning::$invalid binário(s) sem assinatura válida — o SmartScreen vai mostrar aviso de editor desconhecido."
+          }
 
-      - name: Build (só instalador)
-        if: ${{ inputs.build_target == 'instalador' }}
-        run: npx electron-builder --win nsis --publish=never
-
-      # Sem certificado de assinatura de código: o instalador funciona
-      # normalmente, mas o Windows SmartScreen mostra um aviso de "editor
-      # não reconhecido" na primeira execução (Mais informações > Executar
-      # assim mesmo). Normal para builds de teste sem assinatura.
-      #
-      # Dois artefatos separados (em vez de um .zip com os dois .exe juntos),
-      # pra quem só precisa de um dos dois baixar só o que precisa.
-      # if-no-files-found: ignore porque um build com build_target=portable
-      # ou =instalador só gera um dos dois arquivos.
+      # Dois artefatos separados (em vez de um .zip com os dois .exe juntos), pra quem só precisa de um
+      # baixar só o que precisa. if-no-files-found: ignore porque build_target=portable|instalador só
+      # gera um dos dois.
       - name: Upload instalador completo
         uses: actions/upload-artifact@v4
         with:

@@ -1,12 +1,13 @@
 import { useEffect, useRef } from 'react'
 import type { ServiceInstance } from '@shared/types'
+import { PHONE_CATALOG_ID } from '@shared/phone'
 
 // Precisam bater com a largura/altura reais do CSS (.context-menu) — sem
 // clamping, o menu aberto perto da borda inferior da janela (sidebar com
 // muitos serviços) fica cortado por `overflow: hidden` do .app-shell e os
 // últimos botões ficam inacessíveis.
 const MENU_WIDTH = 200
-const MENU_HEIGHT = 124
+const MENU_HEIGHT = 160
 const MARGIN = 8
 
 function clamp(value: number, max: number): number {
@@ -19,6 +20,7 @@ interface ServiceContextMenuProps {
   y: number
   onClose: () => void
   onTogglePinned: () => void
+  onConfigure: () => void
   onDuplicate: () => void
   onRemove: () => void
 }
@@ -29,6 +31,7 @@ export default function ServiceContextMenu({
   y,
   onClose,
   onTogglePinned,
+  onConfigure,
   onDuplicate,
   onRemove
 }: ServiceContextMenuProps): JSX.Element {
@@ -53,6 +56,7 @@ export default function ServiceContextMenu({
     }
   }, [onClose])
 
+  const isPhone = service.catalogId === PHONE_CATALOG_ID
   const left = clamp(x, window.innerWidth - MENU_WIDTH - MARGIN)
   const top = clamp(y, window.innerHeight - MENU_HEIGHT - MARGIN)
 
@@ -66,14 +70,26 @@ export default function ServiceContextMenu({
       >
         {service.pinned ? '📌 Desafixar' : '📌 Fixar (nunca hibernar)'}
       </button>
-      <button
-        onClick={() => {
-          onDuplicate()
-          onClose()
-        }}
-      >
-        ➕ Adicionar outra conta
-      </button>
+      {!isPhone && (
+        <button
+          onClick={() => {
+            onConfigure()
+            onClose()
+          }}
+        >
+          ⚙ Configurar (CSS, JS, proxy)…
+        </button>
+      )}
+      {!isPhone && (
+        <button
+          onClick={() => {
+            onDuplicate()
+            onClose()
+          }}
+        >
+          ➕ Adicionar outra conta
+        </button>
+      )}
       <button
         className="context-menu-danger"
         onClick={() => {

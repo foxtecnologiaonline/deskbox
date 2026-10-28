@@ -17,19 +17,25 @@
     "dist": "npm run build && electron-builder --publish=never",
     "dist:mac": "npm run build && electron-builder --mac --publish=never",
     "dist:win": "npm run build && electron-builder --win --publish=never",
-    "dist:linux": "npm run build && electron-builder --linux --publish=never"
+    "dist:linux": "npm run build && electron-builder --linux --publish=never",
+    "test": "node scripts/run-tests.mjs",
+    "e2e": "npm run build && xvfb-run -a node scripts/e2e.mjs"
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "electron-updater": "^6.8.11",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.18.2",
     "@vitejs/plugin-react": "^4.3.3",
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
+    "qrcode-generator": "^2.0.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"
   },
@@ -39,26 +45,48 @@
     "directories": {
       "output": "release"
     },
-    "files": ["out/**/*"],
+    "files": [
+      "out/**/*"
+    ],
     "compression": "maximum",
     "afterPack": "scripts/afterPack.js",
     "mac": {
       "category": "public.app-category.productivity",
-      "target": ["dmg"]
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "win": {
-      "target": ["nsis", "portable"]
+      "target": [
+        "nsis",
+        "portable"
+      ]
     },
     "nsis": {
-      "artifactName": "${productName}-${version}-setup.${ext}",
-      "differentialPackage": false
+      "artifactName": "${productName}-${version}-setup.${ext}"
     },
     "portable": {
       "artifactName": "${productName}-${version}-portable.${ext}"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "category": "Network"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "foxtecnologiaonline",
+        "repo": "deskbox",
+        "releaseType": "release"
+      }
+    ]
   }
 }

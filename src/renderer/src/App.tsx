@@ -5,6 +5,8 @@ import AddServiceModal from './components/AddServiceModal'
 import NewWorkspaceModal from './components/NewWorkspaceModal'
 import CommandPalette from './components/CommandPalette'
 import SettingsModal from './components/SettingsModal'
+import ServiceSettingsModal from './components/ServiceSettingsModal'
+import PhonePairingModal from './components/PhonePairingModal'
 import LockScreen from './components/LockScreen'
 import EmptyState from './components/EmptyState'
 import Onboarding from './components/Onboarding'
@@ -18,6 +20,8 @@ export default function App(): JSX.Element {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [serviceContextMenuOpen, setServiceContextMenuOpen] = useState(false)
+  const [configuringId, setConfiguringId] = useState<string | null>(null)
+  const [phoneModalOpen, setPhoneModalOpen] = useState(false)
   const [memoryUsage, setMemoryUsage] = useState<Record<string, number>>({})
 
   useEffect(() => {
@@ -86,7 +90,14 @@ export default function App(): JSX.Element {
   // quando ainda não há nenhum serviço (logo, nenhum BrowserView pra esconder).
   const onboardingOpen = Boolean(state && !state.onboardingDismissed)
   const overlayOpen =
-    modalOpen || workspaceModalOpen || paletteOpen || settingsOpen || onboardingOpen || serviceContextMenuOpen
+    modalOpen ||
+    workspaceModalOpen ||
+    paletteOpen ||
+    settingsOpen ||
+    onboardingOpen ||
+    serviceContextMenuOpen ||
+    configuringId !== null ||
+    phoneModalOpen
   useEffect(() => {
     window.deskbox.setOverlayOpen(overlayOpen)
   }, [overlayOpen])
@@ -146,6 +157,7 @@ export default function App(): JSX.Element {
         onMoveToWorkspace={(instanceId, workspaceId) => window.deskbox.moveServiceToWorkspace(instanceId, workspaceId)}
         onTogglePinned={(id) => window.deskbox.toggleServicePinned(id)}
         onDuplicate={handleDuplicateService}
+        onConfigure={(service) => setConfiguringId(service.instanceId)}
         onContextMenuOpenChange={setServiceContextMenuOpen}
         onAddClick={() => setModalOpen(true)}
         onThemeToggle={() => window.deskbox.setTheme(nextTheme[state.theme])}
@@ -167,6 +179,10 @@ export default function App(): JSX.Element {
           onClose={() => setModalOpen(false)}
           onAddFromCatalog={handleAddFromCatalog}
           onAddCustom={handleAddCustom}
+          onAddPhone={() => {
+            setModalOpen(false)
+            setPhoneModalOpen(true)
+          }}
         />
       )}
       {workspaceModalOpen && (
@@ -198,9 +214,20 @@ export default function App(): JSX.Element {
           minimizeToTray={state.minimizeToTray}
           launchAtLogin={state.launchAtLogin}
           startMinimized={state.startMinimized}
+          autoUpdate={state.autoUpdate}
+          sync={state.sync}
+          pendingJsCount={state.services.filter((service) => service.jsPendingApproval).length}
           onClose={() => setSettingsOpen(false)}
         />
       )}
+      {configuringId && state.services.find((service) => service.instanceId === configuringId) && (
+        <ServiceSettingsModal
+          key={configuringId}
+          service={state.services.find((service) => service.instanceId === configuringId)!}
+          onClose={() => setConfiguringId(null)}
+        />
+      )}
+      {phoneModalOpen && <PhonePairingModal onClose={() => setPhoneModalOpen(false)} />}
       {onboardingOpen && <Onboarding onDismiss={() => window.deskbox.dismissOnboarding()} />}
       <ToastHost />
     </div>

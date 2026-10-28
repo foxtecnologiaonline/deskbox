@@ -121,12 +121,11 @@ Pedido do usuário: rodar em máquinas corporativas onde instalar programas é b
 - **Onboarding guiado**: cartão dispensável no primeiro uso (`DeskboxState.onboardingDismissed`), com as 3 dicas principais (adicionar serviço, workspaces, `Ctrl+K`).
 
 ## Fora do escopo (próximas versões)
-- CSS/JS customizado por serviço.
-- Proxy por serviço (hoje é só global).
-- Sincronização de configuração entre dispositivos (conta Deskbox) — decisão de arquitetura em aberto (backend próprio? Supabase/Firebase? sync via arquivo?).
 - Criptografia local dos dados de sessão (hoje a senha mestre é só uma tela de privacidade, não criptografa os dados salvos em disco).
-- Auto-update.
-- Assinatura de código para distribuição (macOS/Windows).
+- Sinalização do controle de celular com TLS (`wss://`) e fingerprint do certificado fixado no QR — hoje é `ws://` na LAN (ver "Limitações conhecidas" em `docs/phone-protocol.md`).
+- Controle de celular fora da rede local (exige servidor de sinalização público + TURN) e iPhone (a Apple não permite controle remoto sem MDM).
+- Proxy com autenticação (usuário/senha) por serviço.
+- Assinatura de código: o pipeline está pronto (`docs/release.md`), mas precisa de um certificado do dono do projeto.
 
 ## Revisão pós-fase-4 (correções aplicadas)
 
@@ -178,7 +177,51 @@ Mais uma passada de `/code-review` (alto esforço) sobre a leva de bandeja/notif
 3. **Notificação espúria ao adicionar/duplicar um serviço com não lidos pré-existentes**: `handleUnreadMessage` comparava a contagem nova com `service.unreadCount` do estado (que começa em `0` pra toda instância nova). Numa conta restaurada de sessão com mensagens já não lidas antes mesmo de abrir no Deskbox (ex.: WhatsApp com 5 não lidas), a primeira leitura do preload (`count = 5`) era maior que o `0` inicial, e o usuário recebia uma notificação de "mensagem nova" pra mensagens que não eram novas — bem no momento de adicionar a conta. Corrigido com um `Set<instanceId>` (`seenUnreadInstanceIds`) que marca a primeira leitura de cada instância só como linha de base, sem notificar; só a partir da segunda leitura em diante uma contagem maior dispara notificação de verdade. Limpo em `removeService`/`removeWorkspace`/`importConfig` pra não crescer sem limite.
 4. **Seis setters quase idênticos** (`toggleServicePinned`, `setSidebarDensity`, `setNotificationsEnabled`, `setMinimizeToTray`, `setLaunchAtLogin`, `setStartMinimized`) repetiam o mesmo bloco de 4 linhas (checar lock → mesclar estado → notificar renderer → devolver estado). Consolidado num helper privado `patchState()` — reduz cada um a uma linha e evita o risco de uma futura 7ª configuração esquecer o `if (this.locked)`.
 
-## v2 — Controle de celular (Android) dentro do Deskbox
+## Leva 3 — CSS/JS e proxy por serviço, sync, auto-update, assinatura e controle de celular
+
+Seis itens que estavam em "Fora do escopo"/v2. Como esta leva tem muita superfície de segurança (JS injetado em páginas logadas, arquivo de config vindo de fora, servidor na LAN), ela veio acompanhada de **testes automatizados de verdade** (`npm test`: 36 testes; `npm run e2e`: 24 verificações com o Electron real via CDP) e de uma revisão de código antes do commit.
+
+### CSS, JS e proxy por serviço
+- `ServiceInstance` ganhou `proxy`, `customCss`, `customJs`, `approvedJsHash`. CSS entra via `insertCSS` e JS via `executeJavaScript` no `dom-ready` (a cada carregamento). Trocar só o CSS troca a folha (`removeInsertedCSS` + `insertCSS`) **sem recarregar**; proxy ou JS recarregam o serviço.
+- **Proxy por serviço** sobrepõe o global só naquela partição (`session.setProxy` por `persist:`); `direct://` faz o serviço ignorar o proxy global. Verificado no e2e: a requisição de um serviço passa pelo proxy dele e o outro serviço **não**.
+- **Aprovação de JS (decisão de segurança)**: JS personalizado roda dentro da página com a sessão logada, então código que chega por **sync ou importação** nunca executa sozinho. Só roda se `sha256(customJs) === approvedJsHash` — hash local, que **não** é exportado nem sincronizado. Salvar o código pelo modal "Configurar" (depois de revisar) aprova. O ícone mostra ⚠ e o modal um aviso enquanto está pendente.
+- Importação e sync validam tudo que vem de fora (`parseSyncPayload`): só URLs `http(s)` (nada de `file://`/`javascript:`), CSS/JS ≤ 200 KB, workspace existente. Isso também fechou uma brecha antiga: o import manual aceitava qualquer string como URL.
+
+### Sincronização entre dispositivos
+- **Decisão** (a pergunta "backend próprio? Supabase? arquivo?" estava em aberto): **arquivo numa pasta** que o usuário já sincroniza (Dropbox/OneDrive/Drive/Syncthing). Zero servidor, zero conta, zero custo, e a privacidade fica nas mãos do usuário.
+- Arquivo `deskbox-sync.json` com envelope versionado. Criptografia opcional: **AES-256-GCM**, chave por **scrypt** (N=16384, salt aleatório por gravação), cabeçalho (`updatedAt`, `deviceId`) como **AAD** — adulterar a data invalida a autenticação. Parâmetros do KDF vindos do arquivo são limitados (um arquivo hostil não consegue pedir GBs de memória). A senha fica guardada com o cofre do SO (`safeStorage`); sem cofre (Linux sem keyring) o app pede a senha de novo a cada abertura.
+- **O que sincroniza**: serviços (nome, URL, workspace, ordem, ícone, fixado, CSS, JS), workspaces, tema, hibernação, densidade, notificações. **O que não**: senha mestre, logins/sessões (ficam em cada dispositivo), proxy global e por serviço (rede do trabalho ≠ casa), bandeja/iniciar com o sistema, serviço ativo, **celulares pareados** (o pareamento é por computador).
+- **Conflitos**: *last-writer-wins* pela config inteira (`configUpdatedAt`). O carimbo é **monotônico** (`max(agora, anterior+1)`) para um relógio atrasado não fazer a edição local perder; carimbo a mais de 1 dia no futuro é recusado ("confira o relógio"). Ao ligar o sync numa pasta que já tem config diferente da do dispositivo, o usuário escolhe qual lado vence — nunca sobrescreve em silêncio.
+- Escrita atômica (arquivo temporário + `rename`), `fs.watch` + polling de 60 s (clientes de nuvem trocam o arquivo por rename), push com debounce de 2 s, tudo serializado.
+
+### Auto-update
+- `electron-updater` + GitHub Releases (`build.publish`). Instalador NSIS e AppImage baixam em segundo plano e instalam ao reiniciar; o **portátil só avisa** (é um `.exe` avulso). Detalhes, requisitos (repo público, tag = versão, macOS só assinado) e o fluxo de release em [`docs/release.md`](release.md).
+- **Limite de validação honesto**: o auto-update só se prova ponta a ponta depois de publicar uma release e atualizar a partir de uma versão anterior. O e2e cobre o caminho de desenvolvimento (`unsupported`) e o app empacotado sobe com o módulo no asar.
+
+### Assinatura de código
+- `scripts/ci-build.mjs` escolhe o modo pelos segredos: certificado `.pfx` (`WIN_CSC_LINK`), **Azure Trusted Signing**, ou macOS Developer ID + notarização; sem segredos, build sem assinatura com aviso explícito no log. Os workflows verificam a assinatura (`Get-AuthenticodeSignature`) e têm a opção `require_signature`. Guia completo e lista de segredos em [`docs/release.md`](release.md).
+- **Não dá pra concluir sem o dono do projeto**: emitir o certificado (pago) e cadastrar os segredos é uma ação dele.
+
+### Controle de celular Android
+- Arquitetura da v2 mantida (app companion empurra a tela via `MediaProjection` + `AccessibilityService`, WebRTC, Deskbox como cliente), **somente na LAN** (decisão para a pergunta "local ou relay?": local primeiro; relay exige servidor público + TURN, é outra decisão de infraestrutura). Protocolo em [`docs/phone-protocol.md`](phone-protocol.md).
+- No Deskbox: `PhoneServer` (HTTP + WebSocket, porta 47890+) faz pareamento (código de 6 dígitos, 5 min, uso único, limite por IP **e** teto global por código), relay de sinalização e serve o **viewer** (HTML + WebRTC) que abre num `BrowserView` como qualquer serviço (hibernação, workspaces, atalhos… de graça). O pareamento vira um serviço "Celular Android" na sidebar; remover o serviço revoga o token.
+- **Defesas do servidor local**: o viewer só é servido para loopback com `Host` de loopback (anti DNS-rebinding), e o WebSocket do viewer exige `Origin` exato **e** uma chave aleatória por execução embutida na página — sem isso, qualquer site aberto no navegador do usuário poderia abrir `ws://127.0.0.1` e espiar/controlar o celular. Tokens ficam só como hash SHA-256 em `phones.json`.
+- Validado ponta a ponta no Electron real com um "celular" simulado falando o protocolo: vídeo WebRTC renderizado no viewer e `tap`/`swipe`/`key`/`text` chegando pelo DataChannel.
+- App Android em `android/` (Kotlin, Gradle). O CI (`build-android.yml`) compila o APK de debug.
+- **Limitação conhecida**: sinalização `ws://` sem TLS na LAN (token pode ser lido por quem estiver capturando tráfego na mesma rede). Evolução planejada: `wss://` com certificado autoassinado e fingerprint no QR.
+
+### Revisão (problemas reais encontrados e corrigidos antes do commit)
+1. **DoS remoto sem autenticação**: `new URL('//', …)` lançava exceção no handler de `upgrade` do servidor (escuta em `0.0.0.0`); qualquer pessoa na LAN derrubava o processo principal com um `GET //` + `Upgrade`. Agora nada vindo da rede passa por `new URL`/`decodeURIComponent` sem proteção, os handlers têm try/catch e há teste que manda alvos malformados.
+2. **Carimbo do sync com relógio atrasado/hostil** perdia edições locais ou travava o sync com `updatedAt` no futuro → carimbo monotônico + recusa de datas > 1 dia à frente.
+3. **Celular pareado sumia ao importar/sincronizar** config com workspaces diferentes (sem UI pra revogar o token) → é movido pro primeiro workspace.
+4. **Um serviço com URL inválida quebrava o sync de todos os dispositivos** (o parse recusa o arquivo inteiro) → `addService` só aceita `http(s)` e serviços inválidos nunca entram no payload.
+5. **Brute-force do código de pareamento por vários IPs** → teto global de tentativas por código; mapa de falhas é podado.
+6. **Viewer**: status "instável" nunca saía da tela; swipe que terminava fora do quadro virava swipe de comprimento zero; `bye` do celular deixava a última imagem congelada.
+7. **`setState` serializava a config inteira (com até 200 KB de CSS/JS por serviço) duas vezes a cada atualização de unread** → comparação campo a campo (`syncableEqual`), O(1) para strings inalteradas.
+8. **Condição de corrida no `SyncManager`** (achada pelos próprios testes): `syncNow()` chamado entre a decisão de sair do laço e o `.finally()` perdia a atualização. `syncNow()` agora aguarda de fato a execução em andamento.
+9. **Bônus de tamanho**: `react`/`react-dom` estavam indo dentro do `app.asar` mesmo já embutidos pelo Vite no renderer → movidos para `devDependencies` (**asar 7,2 MB → 2,4 MB**, já contando `electron-updater` e `ws`).
+
+## v2 — Controle de celular (Android) dentro do Deskbox (implementado na Leva 3)
 
 Ideia: embutir uma tela do celular como se fosse mais um "serviço" do Deskbox, com controle de toque/teclado real, não só espelhamento passivo.
 

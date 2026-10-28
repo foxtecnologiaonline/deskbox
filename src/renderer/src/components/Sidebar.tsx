@@ -22,6 +22,7 @@ interface SidebarProps {
   onMoveToWorkspace: (instanceId: string, workspaceId: string) => void
   onTogglePinned: (instanceId: string) => void
   onDuplicate: (service: ServiceInstance) => void
+  onConfigure: (service: ServiceInstance) => void
   onAddClick: () => void
   onThemeToggle: () => void
   onOpenPalette: () => void
@@ -48,6 +49,7 @@ export default function Sidebar({
   onMoveToWorkspace,
   onTogglePinned,
   onDuplicate,
+  onConfigure,
   onAddClick,
   onThemeToggle,
   onOpenPalette,
@@ -129,6 +131,11 @@ export default function Sidebar({
             <button className="service-icon" onClick={() => onSelect(service.instanceId)}>
               <img src={service.iconUrl || faviconUrl(service.domain)} alt={service.name} loading="lazy" />
               {service.loading && !service.hibernated && <span className="service-spinner" />}
+              {service.jsPendingApproval && (
+                <span className="js-pending-badge" title="JS personalizado aguardando sua aprovação">
+                  ⚠
+                </span>
+              )}
               {service.pinned && <span className="pin-badge" title="Fixado — nunca hiberna">📌</span>}
               {service.unreadCount > 0 && (
                 <span className="unread-badge">{service.unreadCount > 99 ? '99+' : service.unreadCount}</span>
@@ -178,6 +185,7 @@ export default function Sidebar({
           y={contextMenu.y}
           onClose={closeContextMenu}
           onTogglePinned={() => onTogglePinned(contextMenuService.instanceId)}
+          onConfigure={() => onConfigure(contextMenuService)}
           onDuplicate={() => onDuplicate(contextMenuService)}
           onRemove={() => onRemove(contextMenuService.instanceId)}
         />
