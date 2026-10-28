@@ -183,11 +183,14 @@ export interface PairingInfo {
   code: string
   expiresAt: number
   port: number
-  /** IPv4 da LAN, privados primeiro. */
+  /** IPv4 da LAN, do mais provável (Wi-Fi/cabo) ao menos provável (VPN, VMs). */
   hosts: string[]
-  /** deskbox://pair?host=..&port=..&code=.. — o que o QR codifica. */
+  /** deskbox://pair?host=..&port=..&code=..&alt=.. — o que o QR codifica. */
   uri: string
 }
+
+/** Resultado de "Conectar pelo celular" (conexão reversa: o Deskbox conecta no app do celular). */
+export type PhoneLinkResult = { ok: true; deviceId: string; name: string } | { ok: false; error: string }
 
 export interface PhoneEvent {
   type: 'paired' | 'online' | 'offline'

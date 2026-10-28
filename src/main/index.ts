@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, Tray, Menu } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, Tray, Menu } from 'electron'
 import { join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { IPC } from '@shared/ipc'
@@ -16,7 +16,7 @@ import { Store } from './store'
 import { ServicesManager } from './services-manager'
 import { SyncManager } from './sync/sync-manager'
 import { Updater } from './updater'
-import { PhoneServer } from './phone/phone-server'
+import { PhoneServer, type SecretBox } from './phone/phone-server'
 
 // Build portátil (electron-builder "portable" no Windows): ao rodar o .exe
 // direto de um pendrive/pasta, sem instalar, o electron-builder expõe a pasta
@@ -40,10 +40,25 @@ let manager: ServicesManager | null = null
 const store = new Store()
 let syncManager: SyncManager | null = null
 let updater: Updater | null = null
-// Servidor do controle de celular (sinalização WebRTC na LAN). Sobe sob demanda — só se já houver
-// celular pareado ou quando o usuário abrir o pareamento.
-const phoneServer = new PhoneServer(join(app.getPath('userData'), 'phones.json'), (event) =>
-  manager?.handlePhoneEvent(event)
+// Controle de celular. O servidor LAN (que o firewall do Windows pede pra liberar) só sobe sob demanda — se
+// houver celular pareado no modo direto ou quando o usuário abre o pareamento; o do viewer é só loopback.
+// O segredo da conexão reversa vai cifrado com o cofre do SO quando ele existe.
+const phoneSecrets: SecretBox = {
+  seal: (value) =>
+    safeStorage.isEncryptionAvailable() ? `safe:${safeStorage.encryptString(value).toString('base64')}` : `plain:${value}`,
+  open: (sealed) => {
+    try {
+      if (sealed.startsWith('safe:')) return safeStorage.decryptString(Buffer.from(sealed.slice(5), 'base64'))
+      return sealed.startsWith('plain:') ? sealed.slice(6) : null
+    } catch {
+      return null
+    }
+  }
+}
+const phoneServer = new PhoneServer(
+  join(app.getPath('userData'), 'phones.json'),
+  (event) => manager?.handlePhoneEvent(event),
+  phoneSecrets
 )
 let tray: Tray | null = null
 // true só entre o clique em "Sair" do tray e o app.quit() de fato — sem essa
@@ -293,6 +308,11 @@ function registerIpcHandlers(): void {
     return phoneServer.startPairing()
   })
   ipcMain.handle(IPC.PHONE_CANCEL_PAIRING, () => phoneServer.cancelPairing())
+  ipcMain.handle(IPC.PHONE_LINK, (_event, address: string, code: string) => {
+    if (manager!.isLocked()) return { ok: false, error: 'Destrave o app antes de parear.' }
+    if (typeof address !== 'string' || typeof code !== 'string') return { ok: false, error: 'Dados inválidos.' }
+    return phoneServer.linkPhone(address, code)
+  })
   ipcMain.handle(IPC.TOGGLE_SERVICE_PINNED, (_event, instanceId: string) => manager!.toggleServicePinned(instanceId))
   ipcMain.handle(IPC.SET_SIDEBAR_DENSITY, (_event, density: SidebarDensity) => manager!.setSidebarDensity(density))
   ipcMain.handle(IPC.SET_NOTIFICATIONS_ENABLED, (_event, enabled: boolean) =>
@@ -339,9 +359,10 @@ app.whenReady().then(() => {
   )
   updater.start()
   syncManager?.start()
-  // Celulares já pareados precisam achar o servidor no ar pra reconectar sozinhos.
-  if (phoneServer.hasPairedPhones()) {
-    phoneServer.ensureStarted().catch((error) => console.error('[deskbox] Servidor de celular não iniciou:', error))
+  // Celulares pareados no modo direto precisam achar o servidor LAN no ar pra reconectar sozinhos (os da
+  // conexão reversa não: é o Deskbox que os procura).
+  if (phoneServer.hasDirectPhones()) {
+    phoneServer.ensureLanServer().catch((error) => console.error('[deskbox] Servidor de celular não iniciou:', error))
   }
 
   app.on('activate', () => showMainWindow())

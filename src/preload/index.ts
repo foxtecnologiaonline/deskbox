@@ -5,6 +5,7 @@ import type {
   ImportConfigResult,
   PairingInfo,
   PhoneEvent,
+  PhoneLinkResult,
   ProxyConfig,
   RendererState,
   ServiceSettingsPayload,
@@ -73,6 +74,7 @@ const api = {
   provideSyncPassphrase: (passphrase: string): Promise<SyncResult> => ipcRenderer.invoke(IPC.SYNC_PASSPHRASE, passphrase),
   startPhonePairing: (): Promise<PairingInfo> => ipcRenderer.invoke(IPC.PHONE_START_PAIRING),
   cancelPhonePairing: (): Promise<void> => ipcRenderer.invoke(IPC.PHONE_CANCEL_PAIRING),
+  linkPhone: (address: string, code: string): Promise<PhoneLinkResult> => ipcRenderer.invoke(IPC.PHONE_LINK, address, code),
   onUpdateStatus: (callback: (status: UpdateStatus) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, status: UpdateStatus): void => callback(status)
     ipcRenderer.on(IPC.UPDATE_STATUS, listener)

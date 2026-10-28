@@ -43,5 +43,6 @@ export const IPC = {
   SYNC_PASSPHRASE: 'deskbox:sync-passphrase',
   PHONE_START_PAIRING: 'deskbox:phone-start-pairing',
   PHONE_CANCEL_PAIRING: 'deskbox:phone-cancel-pairing',
+  PHONE_LINK: 'deskbox:phone-link',
   PHONE_CHANGED: 'deskbox:phone-changed'
 } as const

@@ -19,7 +19,7 @@ export function viewerHtml(deviceId: string, key: string, port: number): string 
   #stage { flex: 1; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; }
   video { max-width: 100%; max-height: 100%; background: #000; border-radius: 10px; cursor: pointer; touch-action: none; outline: none; }
   #overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; pointer-events: none; }
-  #overlay span { background: rgba(0,0,0,.65); padding: 10px 16px; border-radius: 10px; max-width: 420px; line-height: 1.5; }
+  #overlay span { background: rgba(0,0,0,.65); padding: 10px 16px; border-radius: 10px; max-width: 460px; line-height: 1.5; white-space: pre-line; }
   #bar { display: flex; gap: 6px; padding: 8px; background: #171a21; align-items: center; }
   #bar button { background: #262b36; color: inherit; border: 0; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
   #bar button:hover { background: #313847; }
@@ -40,7 +40,9 @@ export function viewerHtml(deviceId: string, key: string, port: number): string 
     <button data-key="home" title="Início">● Início</button>
     <button data-key="recents" title="Apps recentes">▣ Recentes</button>
     <button data-key="notifications" title="Notificações">🔔</button>
-    <input id="text" placeholder="Digitar no celular (Enter envia)" autocomplete="off">
+    <input id="text" placeholder="Texto pro celular (Enter envia) — ou clique na tela e digite" autocomplete="off">
+    <button data-key="backspace" title="Apagar (Backspace)">⌫</button>
+    <button data-key="enter" title="Enter / enviar">⏎</button>
   </div>
 </div>
 <script type="application/json" id="cfg">${config}</script>
@@ -59,6 +61,8 @@ export const VIEWER_JS = `(() => {
   let ws = null, pc = null, channel = null, phoneOnline = false, pendingIce = [], remoteSet = false;
   let reconnectDelay = 500, retryTimer = null;
   let screenInfo = null, a11y = true;
+  const OFFLINE_HELP = 'Celular offline.\\nNo celular: abra o app Deskbox Celular e toque em "Iniciar compartilhamento" (mesma rede Wi-Fi).\\n' +
+    'Se ele não conectar (firewall do Windows, Deskbox portátil, rede Pública): Adicionar serviço → Celular Android → "Conectar pelo celular".';
 
   function setStatus(msg) {
     statusEl.textContent = msg || '';
@@ -121,7 +125,7 @@ export const VIEWER_JS = `(() => {
     ws.onmessage = async (e) => {
       let msg; try { msg = JSON.parse(e.data); } catch { return; }
       if (msg.type === 'phone-online') { phoneOnline = true; startSession(); }
-      else if (msg.type === 'phone-offline') { phoneOnline = false; closePeer(); setStatus('Celular offline. Abra o app Deskbox no celular (mesma rede Wi-Fi) e toque em iniciar.'); }
+      else if (msg.type === 'phone-offline') { phoneOnline = false; closePeer(); setStatus(OFFLINE_HELP); }
       else if (msg.type === 'bye') { closePeer(); setStatus('O celular parou de compartilhar a tela.'); }
       else if (msg.type === 'offer') { try { await handleOffer(msg.sdp); } catch (err) { console.error(err); } }
       else if (msg.type === 'ice' && msg.candidate) {
@@ -187,7 +191,30 @@ export const VIEWER_JS = `(() => {
 
   document.querySelectorAll('#bar button[data-key]').forEach((b) => b.addEventListener('click', () => sendControl({ t: 'key', key: b.dataset.key })));
   textInput.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter' && textInput.value) { sendControl({ t: 'text', text: textInput.value }); textInput.value = ''; }
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    // Com texto: manda o texto. Vazio: Enter de verdade (enviar a mensagem no app aberto no celular).
+    if (textInput.value) { sendControl({ t: 'text', text: textInput.value }); textInput.value = ''; }
+    else sendControl({ t: 'key', key: 'enter' });
+  });
+
+  // Teclado direto: com a tela do celular em foco (clique nela), o que se digita vai pro campo focado no celular.
+  // Letras são agrupadas por alguns ms pra não mandar uma mensagem por tecla numa digitação rápida.
+  let typed = '', typedTimer = null;
+  function flushTyped() { if (typedTimer) { clearTimeout(typedTimer); typedTimer = null; } if (typed) { sendControl({ t: 'text', text: typed }); typed = ''; } }
+  video.addEventListener('keydown', (ev) => {
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    const special = { Enter: 'enter', Backspace: 'backspace', Escape: 'back' }[ev.key];
+    if (special) { ev.preventDefault(); flushTyped(); sendControl({ t: 'key', key: special }); return; }
+    if (ev.key.length === 1) {
+      ev.preventDefault();
+      typed += ev.key;
+      if (!typedTimer) typedTimer = setTimeout(flushTyped, 60);
+    }
+  });
+  video.addEventListener('paste', (ev) => {
+    const text = ev.clipboardData && ev.clipboardData.getData('text');
+    if (text) { ev.preventDefault(); flushTyped(); sendControl({ t: 'text', text }); }
   });
 
   connect();

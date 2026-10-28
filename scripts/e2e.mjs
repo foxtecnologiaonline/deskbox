@@ -198,13 +198,18 @@ try {
   viewer.on('Runtime.consoleAPICalled', (p) => viewerLog.push(`${p.type}: ${(p.args || []).map((a) => a.value ?? a.description).join(' ')}`))
   viewer.on('Runtime.exceptionThrown', (p) => viewerLog.push(`EXC: ${p.exceptionDetails?.exception?.description || p.exceptionDetails?.text}`))
   check('viewer do celular carregou no BrowserView', true)
-  check('viewer mostra "celular offline" antes de conectar', await waitFor(async () => /offline/i.test(await viewer.eval(`document.getElementById('status').textContent`)), 'status offline').then(() => true))
+  check('viewer mostra "celular offline" antes de conectar', await waitFor(async () => /offline/i.test(await viewer.eval(`(document.getElementById('status') || document.body).textContent`)), 'status offline').then(() => true, async (e) => { console.log('viewer body:', await viewer.eval('document.body ? document.body.innerText : location.href')); throw e }))
+
+  // O celular (modo direto) fala com o servidor LAN, que é outro servidor/porta — o do viewer é só loopback.
+  const lanPort = await main.eval(`window.deskbox.startPhonePairing().then((i) => i.port)`)
+  await main.eval(`window.deskbox.cancelPhonePairing()`)
+  check('servidor LAN do celular separado do servidor do viewer', Number(lanPort) > 0 && String(lanPort) !== String(viewerPort), `lan=${lanPort} viewer=${viewerPort}`)
 
   const SIM = `(async () => {
     window.__sim = { received: [], state: 'init', log: [] };
     document.addEventListener('securitypolicyviolation', (e) => window.__sim.log.push('CSP violation: ' + e.violatedDirective + ' ' + e.blockedURI));
     window.addEventListener('unhandledrejection', (e) => window.__sim.log.push('unhandled: ' + (e.reason && e.reason.message || e.reason)));
-    const ws = new WebSocket('ws://127.0.0.1:${viewerPort}/signal');
+    const ws = new WebSocket('ws://127.0.0.1:${lanPort}/signal');
     window.__sim.ws = ws;
     let pc = null;
     const canvas = document.createElement('canvas'); canvas.width = 360; canvas.height = 640;
@@ -281,6 +286,21 @@ try {
   await viewer.eval(`(() => { const i = document.getElementById('text'); i.value = 'olá mundo'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })) })()`)
   const text = await waitFor(async () => (await simRef.eval('window.__sim.received')).find((m) => m.t === 'text'), 'DataChannel recebeu "text"')
   check('campo de texto envia "text"', text.text === 'olá mundo')
+
+  // teclado direto: com o vídeo em foco, letras viram "text" (agrupadas) e Enter/Backspace viram teclas
+  await simRef.eval('window.__sim.received.length = 0')
+  await viewer.eval(`document.getElementById('v').focus()`)
+  for (const ch of 'oi') await viewer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: ch, text: ch })
+  await viewer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 })
+  await viewer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+  const typedSeq = await waitFor(async () => {
+    const r = await simRef.eval('window.__sim.received')
+    return r.some((m) => m.t === 'key' && m.key === 'enter') ? r : null
+  }, 'teclas digitadas com o vídeo em foco')
+  const order = typedSeq.map((m) => (m.t === 'text' ? `text:${m.text}` : `${m.t}:${m.key}`)).join(' ')
+  check('teclado direto: "oi" + Backspace + Enter chegam em ordem', order === 'text:oi key:backspace key:enter', order)
+  await viewer.eval(`document.querySelector('#bar button[data-key="enter"]').click()`)
+  check('botão ⏎ envia key:enter', Boolean(await waitFor(async () => (await simRef.eval('window.__sim.received')).filter((m) => m.key === 'enter').length >= 2 || null, 'botão enter')))
 
   // celular para de compartilhar (bye): o viewer limpa o quadro e avisa, em vez de congelar a última imagem
   await simRef.eval(`window.__sim.ws.send(JSON.stringify({ type: 'bye' }))`)
