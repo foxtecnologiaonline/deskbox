@@ -126,25 +126,25 @@ writeFileSync(join(dataDir, 'phones.json'), JSON.stringify([{ deviceId: DEVICE, 
 // ---------- sobe o app ----------
 const app = spawn(
   electronPath,
-  [root, '--no-sandbox', `--remote-debugging-port=${CDP_PORT}`, '--disable-gpu', '--disable-features=WebRtcHideLocalIpsWithMdns'],
+  [root, '--no-sandbox', `--remote-debugging-port=${CDP_PORT}`, '--disable-gpu', '--disable-features=WebRtcHideLocalIpsWithMdns', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'],
   { env: { ...process.env, PORTABLE_EXECUTABLE_DIR: tmp, ELECTRON_ENABLE_LOGGING: '0' }, stdio: ['ignore', 'ignore', 'pipe'] }
 )
 let appErr = ''
 app.stderr.on('data', (d) => (appErr += d))
 
 let main
+let simRef = null
 let viewerRef = null
 const viewerLog = []
 async function diagnose() {
   console.log('--- diagnóstico ---')
-  try { console.log('sim:', JSON.stringify(await main.eval('({ state: window.__sim && window.__sim.state, log: window.__sim && window.__sim.log, received: window.__sim && window.__sim.received })'))) } catch (e) { console.log('sim indisponível:', e.message) }
+  try { console.log('sim:', JSON.stringify(await simRef.eval('({ state: window.__sim && window.__sim.state, log: window.__sim && window.__sim.log, received: window.__sim && window.__sim.received })'))) } catch (e) { console.log('sim indisponível:', e.message) }
   try { console.log('viewer status:', JSON.stringify(await viewerRef.eval(`document.getElementById('status').textContent`))) } catch (e) { console.log('viewer indisponível:', e.message) }
   console.log('viewer console:', JSON.stringify(viewerLog.slice(-20)))
 }
 try {
   const mainTarget = await waitFor(() => findTarget((t) => t.url.includes('renderer/index.html')), 'janela principal', 30000)
   main = new Cdp(mainTarget.webSocketDebuggerUrl)
-  await main.send('Page.setBypassCSP', { enabled: true }) // pro "celular" simulado abrir ws:// a partir da janela principal
   const state = await waitFor(() => main.eval('window.deskbox.getState()'), 'estado do app')
   check('app sobe com os 4 serviços da config', state.services.length === 4)
   check('serviço de JS não aprovado é marcado como pendente', state.services.find((s) => s.instanceId === 's2').jsPendingApproval === true)
@@ -153,9 +153,11 @@ try {
   // 1) s1: CSS + JS aprovado
   const t1 = await waitFor(() => findTarget((t) => t.url === `http://127.0.0.1:${sitePort}/` && t.title === 'js-ran'), 's1 com JS aprovado executado', 20000)
   const c1 = new Cdp(t1.webSocketDebuggerUrl)
+  // O "celular" simulado roda nesta página (http comum, sem CSP) — a janela principal tem CSP `default-src 'self'`
+  // e não pode abrir ws://; contornar isso com Page.setBypassCSP dependia de timing e falhava de forma intermitente no CI.
+  simRef = c1
   check('JS aprovado executou (document.title)', t1.title === 'js-ran')
   check('CSS personalizado aplicado', (await c1.eval(`getComputedStyle(document.getElementById('h')).color`)) === 'rgb(1, 2, 3)')
-  c1.close()
 
   // 2) s2: CSS aplica, JS pendente NÃO executa
   await main.eval(`window.deskbox.selectService('s2')`)
@@ -200,6 +202,7 @@ try {
 
   const SIM = `(async () => {
     window.__sim = { received: [], state: 'init', log: [] };
+    document.addEventListener('securitypolicyviolation', (e) => window.__sim.log.push('CSP violation: ' + e.violatedDirective + ' ' + e.blockedURI));
     window.addEventListener('unhandledrejection', (e) => window.__sim.log.push('unhandled: ' + (e.reason && e.reason.message || e.reason)));
     const ws = new WebSocket('ws://127.0.0.1:${viewerPort}/signal');
     window.__sim.ws = ws;
@@ -235,9 +238,9 @@ try {
     };
     return 'started';
   })()`
-  await main.eval(SIM)
+  await simRef.eval(SIM)
   try {
-    await waitFor(async () => (await main.eval('window.__sim.state')) === 'answered', 'celular simulado recebeu a resposta (answer) do viewer', 20000)
+    await waitFor(async () => (await simRef.eval('window.__sim.state')) === 'answered', 'celular simulado recebeu a resposta (answer) do viewer', 20000)
   } catch (e) {
     await diagnose()
     throw e
@@ -252,35 +255,35 @@ try {
   const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2
   const mouse = (type, x, y) => viewer.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, pointerType: 'mouse' })
   await mouse('mousePressed', cx, cy); await sleep(40); await mouse('mouseReleased', cx, cy)
-  const tap = await waitFor(async () => (await main.eval('window.__sim.received')).find((m) => m.t === 'tap'), 'DataChannel recebeu "tap"')
+  const tap = await waitFor(async () => (await simRef.eval('window.__sim.received')).find((m) => m.t === 'tap'), 'DataChannel recebeu "tap"')
   check('clique no vídeo vira "tap" normalizado no centro (±0.06)', Math.abs(tap.x - 0.5) < 0.06 && Math.abs(tap.y - 0.5) < 0.06, JSON.stringify(tap))
 
   await mouse('mousePressed', cx, cy + rect.h * 0.25); await sleep(60)
   await viewer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: cx, y: cy, button: 'left', buttons: 1 }); await sleep(60)
   await mouse('mouseReleased', cx, cy - rect.h * 0.25)
-  const swipe = await waitFor(async () => (await main.eval('window.__sim.received')).find((m) => m.t === 'swipe'), 'DataChannel recebeu "swipe"')
+  const swipe = await waitFor(async () => (await simRef.eval('window.__sim.received')).find((m) => m.t === 'swipe'), 'DataChannel recebeu "swipe"')
   check('arrastar vira "swipe" de baixo pra cima', swipe.y1 > swipe.y2 && swipe.ms >= 120, JSON.stringify(swipe))
 
   check('overlay de status some quando o vídeo conecta', (await viewer.eval(`document.getElementById('overlay').style.display`)) === 'none')
 
   // soltar FORA do quadro (acima da borda): o ponto final é preso à borda, não vira swipe de comprimento zero
-  await main.eval('window.__sim.received.length = 0')
+  await simRef.eval('window.__sim.received.length = 0')
   await mouse('mousePressed', cx, cy); await sleep(60)
   await viewer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: cx, y: rect.y - 60, button: 'left', buttons: 1 }); await sleep(60)
   await mouse('mouseReleased', cx, rect.y - 60)
-  const edgeSwipe = await waitFor(async () => (await main.eval('window.__sim.received')).find((m) => m.t === 'swipe'), 'swipe que termina fora do quadro')
+  const edgeSwipe = await waitFor(async () => (await simRef.eval('window.__sim.received')).find((m) => m.t === 'swipe'), 'swipe que termina fora do quadro')
   check('swipe que termina acima do quadro é preso à borda (y2≈0), não zerado', edgeSwipe.y2 <= 0.01 && edgeSwipe.y1 > 0.3, JSON.stringify(edgeSwipe))
 
   await viewer.eval(`document.querySelector('#bar button[data-key="home"]').click()`)
-  const key = await waitFor(async () => (await main.eval('window.__sim.received')).find((m) => m.t === 'key' && m.key === 'home'), 'DataChannel recebeu "key:home"')
+  const key = await waitFor(async () => (await simRef.eval('window.__sim.received')).find((m) => m.t === 'key' && m.key === 'home'), 'DataChannel recebeu "key:home"')
   check('botão Início envia key:home', Boolean(key))
 
   await viewer.eval(`(() => { const i = document.getElementById('text'); i.value = 'olá mundo'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })) })()`)
-  const text = await waitFor(async () => (await main.eval('window.__sim.received')).find((m) => m.t === 'text'), 'DataChannel recebeu "text"')
+  const text = await waitFor(async () => (await simRef.eval('window.__sim.received')).find((m) => m.t === 'text'), 'DataChannel recebeu "text"')
   check('campo de texto envia "text"', text.text === 'olá mundo')
 
   // celular para de compartilhar (bye): o viewer limpa o quadro e avisa, em vez de congelar a última imagem
-  await main.eval(`window.__sim.ws.send(JSON.stringify({ type: 'bye' }))`)
+  await simRef.eval(`window.__sim.ws.send(JSON.stringify({ type: 'bye' }))`)
   await waitFor(async () => /parou de compartilhar/i.test(await viewer.eval(`document.getElementById('status').textContent`)), 'viewer reage ao bye')
   check('bye: viewer avisa que o celular parou e solta o vídeo', (await viewer.eval(`document.getElementById('v').srcObject === null`)) === true)
 
@@ -297,6 +300,7 @@ try {
   console.error(appErr.split('\n').filter((l) => /deskbox|Error/i.test(l) && !/dbus|gpu/i.test(l)).slice(-15).join('\n'))
 } finally {
   main?.close()
+  simRef?.close()
   app.kill('SIGTERM')
   await sleep(500)
   site.close(); proxy.close()
