@@ -60,10 +60,27 @@ for (const name of ['CSC_LINK', 'CSC_KEY_PASSWORD', 'WIN_CSC_LINK', 'WIN_CSC_KEY
   if (env[name] !== undefined && !env[name].trim()) delete env[name]
 }
 
-const args = ['electron-builder', ...passthrough, ...extra]
-for (const note of notes) console.log(`[ci-build] ${note}`)
-console.log(`[ci-build] npx ${args.map((a) => (a.includes('=') ? a.split('=')[0] + '=…' : a)).join(' ')}`)
+// Windows: instalador e portátil em execuções SEPARADAS do electron-builder. Na mesma execução o portátil
+// reaproveita o arquivo compactado do instalador — que, por causa do auto-update diferencial (blockmap), é
+// gerado em blocos e fica ~9% (≈6 MB) maior. O portátil nunca se atualiza sozinho, então não deve pagar isso.
+function splitWindowsTargets(list) {
+  const i = list.indexOf('--win')
+  if (i === -1) return [list]
+  let j = i + 1
+  const targets = []
+  while (j < list.length && !list[j].startsWith('-')) targets.push(list[j++])
+  const effective = targets.length ? targets : ['nsis', 'portable'] // padrão da config (package.json → build.win.target)
+  if (effective.length < 2) return [list]
+  return effective.map((target) => [...list.slice(0, i + 1), target, ...list.slice(j)])
+}
 
+const runs = splitWindowsTargets(passthrough).map((list) => ['electron-builder', ...list, ...extra])
+for (const note of notes) console.log(`[ci-build] ${note}`)
+for (const args of runs) {
+  console.log(`[ci-build] npx ${args.map((a) => (a.includes('=') ? a.split('=')[0] + '=…' : a)).join(' ')}`)
+}
 if (dryRun) process.exit(0)
-const result = spawnSync('npx', args, { stdio: 'inherit', shell: process.platform === 'win32', env })
-process.exit(result.status ?? 1)
+for (const args of runs) {
+  const result = spawnSync('npx', args, { stdio: 'inherit', shell: process.platform === 'win32', env })
+  if (result.status !== 0) process.exit(result.status ?? 1)
+}
