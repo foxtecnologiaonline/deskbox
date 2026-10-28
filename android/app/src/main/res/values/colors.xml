@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="deskbox_accent">#4F7CFF</color>
+    <color name="deskbox_accent_dark">#3A5FD0</color>
+    <color name="deskbox_launcher_bg">#1B1F2A</color>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Deskbox Celular</string>
+    <string name="a11y_service_label">Deskbox — controle remoto</string>
+    <string name="a11y_service_description">Permite que o Deskbox, no seu computador, toque, deslize e digite neste celular enquanto você compartilha a tela. Só é usado enquanto o compartilhamento estiver ativo.</string>
+    <string name="notif_channel_name">Compartilhamento de tela</string>
+</resources>
